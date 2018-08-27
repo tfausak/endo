@@ -1,0 +1,13 @@
+# https://github.com/ndmitchell/hlint
+- flags:
+  - default: false
+- extensions:
+  - default: false
+- modules:
+  - default: false
+  - { name: Endo, as: Endo }
+- functions:
+  - default: true
+
+- group: { name: dollar, enabled: true }
+- group: { name: generalise, enabled: true }
