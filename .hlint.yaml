@@ -6,12 +6,14 @@
 - modules:
   - default: false
   - { name: Control.Monad, as: Monad }
+  - { name: Data.Maybe, as: Maybe }
   - { name: Data.Version, as: Version }
   - { name: Endo, as: Endo }
   - { name: Paths_endo, as: Package }
   - { name: System.Console.GetOpt, as: Console }
   - { name: System.Environment, as: Environment }
   - { name: System.Exit, as: Exit }
+  - { name: System.FilePath, as: FilePath }
   - { name: System.IO, as: IO }
 - functions:
   - default: true
