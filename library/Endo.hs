@@ -159,9 +159,8 @@ modeOption = Console.Option
   ['m']
   ["mode"]
   (Console.ReqArg
-    (\string config -> do
-      mode <- parseMode string
-      Right config { configMode = Just mode }
+    (\string config ->
+      fmap (\mode -> config { configMode = Just mode }) (parseMode string)
     )
     "MODE"
   )
@@ -211,9 +210,7 @@ printErrorMessages :: [String] -> IO ()
 printErrorMessages = mapM_ printErrorMessage
 
 printErrorMessageAndExit :: String -> IO a
-printErrorMessageAndExit errorMessage = do
-  printErrorMessage errorMessage
-  Exit.exitFailure
+printErrorMessageAndExit = dieLn . formatErrorMessage
 
 printErrorMessage :: String -> IO ()
 printErrorMessage = warn . formatErrorMessage
@@ -223,27 +220,26 @@ formatErrorMessage = mappend "ERROR: "
 
 
 printHelpAndExit :: String -> IO a
-printHelpAndExit name = do
-  printHelp name
-  Exit.exitFailure
-
-printHelp :: String -> IO ()
-printHelp = warn . help
+printHelpAndExit = die . help
 
 help :: String -> String
 help name = Console.usageInfo name options
 
 
 printVersionAndExit :: IO a
-printVersionAndExit = do
-  printVersion
-  Exit.exitFailure
-
-printVersion :: IO ()
-printVersion = warnLn version
+printVersionAndExit = dieLn version
 
 version :: String
 version = Version.showVersion Package.version
+
+
+dieLn :: String -> IO a
+dieLn = Exit.die
+
+die :: String -> IO a
+die message = do
+  warn message
+  Exit.exitFailure
 
 
 warnLn :: String -> IO ()
