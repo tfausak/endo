@@ -26,10 +26,12 @@ executable:
     - -rtsopts
     - -threaded
   main: Main.hs
+  other-modules: []
   source-dirs: executables
 
 tests:
   test:
     dependencies: endo
     main: Main.hs
-    source-dirs: executables
+    other-modules: []
+    source-dirs: tests
