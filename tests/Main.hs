@@ -6,4 +6,4 @@ where
 import qualified Endo
 
 main :: IO ()
-main = Endo.main
+main = Endo.mainWith "test" ["--help"]

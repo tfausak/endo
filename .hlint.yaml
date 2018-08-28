@@ -6,6 +6,7 @@
 - modules:
   - default: false
   - { name: Control.Monad, as: Monad }
+  - { name: Data.ByteString, as: Bytes }
   - { name: Data.Maybe, as: Maybe }
   - { name: Data.Version, as: Version }
   - { name: Endo, as: Endo }

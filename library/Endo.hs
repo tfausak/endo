@@ -5,6 +5,7 @@ module Endo
 where
 
 import qualified Control.Monad as Monad
+import qualified Data.ByteString as Bytes
 import qualified Data.Maybe as Maybe
 import qualified Data.Version as Version
 import qualified Paths_endo as Package
@@ -24,8 +25,35 @@ main = do
 mainWith :: String -> [String] -> IO ()
 mainWith name arguments = do
   config <- getConfig name arguments
-  print config
-  print (getMode config)
+  input <- getInput (configInputFile config)
+  let mode = getMode config
+  replay <- either printErrorMessageAndExit pure (decodeWith mode input)
+  let output = encodeWith mode replay
+  putOutput (configOutputFile config) output
+
+
+data Replay = Replay deriving Show
+
+
+getInput :: Maybe FilePath -> IO Bytes.ByteString
+getInput = maybe Bytes.getContents Bytes.readFile
+
+-- TODO
+decodeWith :: Mode -> Bytes.ByteString -> Either String Replay
+decodeWith mode _ = case mode of
+  ModeDecode -> Right Replay
+  ModeEncode -> Right Replay
+
+-- TODO
+encodeWith :: Mode -> Replay -> Bytes.ByteString
+encodeWith mode _ = case mode of
+  ModeDecode -> Bytes.empty
+  ModeEncode -> Bytes.empty
+
+putOutput :: Maybe FilePath -> Bytes.ByteString -> IO ()
+putOutput maybeOutputFile output = case maybeOutputFile of
+  Nothing -> Bytes.putStr output
+  Just outputFile -> Bytes.writeFile outputFile output
 
 
 data Config = Config
