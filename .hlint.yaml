@@ -14,11 +14,14 @@
   - { name: Endo, as: Endo }
   - { name: Paths_endo, as: Package }
   - { name: System.Console.GetOpt, as: Console }
+  - { name: System.Clock, as: Clock }
   - { name: System.Environment, as: Environment }
   - { name: System.Exit, as: Exit }
   - { name: System.FilePath, as: FilePath }
   - { name: System.IO, as: IO }
+  - { name: System.IO.Temp, as: Temp }
   - { name: System.Mem, as: Mem }
+  - { name: Text.Printf, as: Printf }
 - functions:
   - default: true
 

@@ -34,7 +34,13 @@ executable:
 
 tests:
   test:
-    dependencies: endo
+    dependencies:
+      clock: '>= 0.7.2 && < 0.8'
+      endo: null
+      temporary: '>= 1.3 && < 1.4'
+    ghc-options:
+      - -rtsopts
+      - -threaded
     main: Main.hs
     other-modules: []
     source-dirs: tests

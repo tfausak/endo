@@ -62,7 +62,7 @@ data Config = Config
   , configMode :: Maybe Mode
   , configShowHelp :: Bool
   , configShowVersion :: Bool
-  } deriving Show
+  }
 
 getConfig :: String -> [String] -> IO Config
 getConfig name arguments = do
@@ -88,7 +88,6 @@ defaultConfig = Config
 data Mode
   = ModeDecode
   | ModeEncode
-  deriving Show
 
 parseMode :: String -> Either String Mode
 parseMode mode = case mode of
