@@ -8,6 +8,7 @@
   - { name: Control.Exception, as: Exception }
   - { name: Control.Monad, as: Monad }
   - { name: Data.ByteString, as: Bytes }
+  - { name: Data.ByteString.Base64, as: Base64 }
   - { name: Data.Int, as: Int }
   - { name: Data.Maybe, as: Maybe }
   - { name: Data.Version, as: Version }

@@ -6,6 +6,7 @@ where
 
 import qualified Control.Monad as Monad
 import qualified Data.ByteString as Bytes
+import qualified Data.ByteString.Base64 as Base64
 import qualified Data.Maybe as Maybe
 import qualified Data.Version as Version
 import qualified Paths_endo as Package
@@ -32,23 +33,23 @@ mainWith name arguments = do
   putOutput (configOutputFile config) output
 
 
-data Replay = Replay deriving Show
+newtype Replay
+  = Replay Bytes.ByteString
+  deriving Show
 
 
 getInput :: Maybe FilePath -> IO Bytes.ByteString
 getInput = maybe Bytes.getContents Bytes.readFile
 
--- TODO
 decodeWith :: Mode -> Bytes.ByteString -> Either String Replay
-decodeWith mode _ = case mode of
-  ModeDecode -> Right Replay
-  ModeEncode -> Right Replay
+decodeWith mode bytes = case mode of
+  ModeDecode -> Right (Replay bytes)
+  ModeEncode -> fmap Replay (Base64.decode bytes)
 
--- TODO
 encodeWith :: Mode -> Replay -> Bytes.ByteString
-encodeWith mode _ = case mode of
-  ModeDecode -> Bytes.empty
-  ModeEncode -> Bytes.empty
+encodeWith mode (Replay bytes) = case mode of
+  ModeDecode -> Base64.encode bytes
+  ModeEncode -> bytes
 
 putOutput :: Maybe FilePath -> Bytes.ByteString -> IO ()
 putOutput maybeOutputFile output = case maybeOutputFile of
