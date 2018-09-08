@@ -5,9 +5,12 @@ module Endo
 where
 
 import qualified Control.Monad as Monad
+import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as Bytes
 import qualified Data.ByteString.Base64 as Base64
+import qualified Data.ByteString.Lazy as LazyBytes
 import qualified Data.Maybe as Maybe
+import qualified Data.Text.Encoding as Encoding
 import qualified Data.Version as Version
 import qualified Paths_endo as Package
 import qualified System.Console.GetOpt as Console
@@ -35,18 +38,28 @@ mainWith name arguments = do
 newtype Replay
   = Replay Bytes.ByteString
 
+instance Aeson.FromJSON Replay where
+  parseJSON = Aeson.withText "Replay"
+    (either fail (pure . Replay) . Base64.decode . Encoding.encodeUtf8)
+
+instance Aeson.ToJSON Replay where
+  toEncoding (Replay bytes) =
+    Aeson.toEncoding (Encoding.decodeUtf8 (Base64.encode bytes))
+  toJSON (Replay bytes) =
+    Aeson.toJSON (Encoding.decodeUtf8 (Base64.encode bytes))
+
 
 replayToBytes :: Replay -> Bytes.ByteString
 replayToBytes (Replay bytes) = bytes
 
 replayToJson :: Replay -> Bytes.ByteString
-replayToJson (Replay bytes) = Base64.encode bytes
+replayToJson = LazyBytes.toStrict . Aeson.encode
 
 replayFromBytes :: Bytes.ByteString -> Either String Replay
 replayFromBytes = Right . Replay
 
 replayFromJson :: Bytes.ByteString -> Either String Replay
-replayFromJson = fmap Replay . Base64.decode
+replayFromJson = Aeson.eitherDecodeStrict'
 
 
 getInput :: Maybe FilePath -> IO Bytes.ByteString
