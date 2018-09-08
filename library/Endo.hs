@@ -6,11 +6,14 @@ where
 
 import qualified Control.Monad as Monad
 import qualified Data.Aeson as Aeson
+import qualified Data.Binary as Binary
+import qualified Data.Binary.Get as Binary
+import qualified Data.Binary.Put as Binary
 import qualified Data.ByteString as Bytes
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Lazy as LazyBytes
 import qualified Data.Maybe as Maybe
-import qualified Data.Text.Encoding as Encoding
+import qualified Data.Text.Encoding as Text
 import qualified Data.Version as Version
 import qualified Paths_endo as Package
 import qualified System.Console.GetOpt as Console
@@ -38,6 +41,10 @@ mainWith name arguments = do
 newtype Replay
   = Replay Base64
 
+instance Binary.Binary Replay where
+  get = fmap Replay Binary.get
+  put (Replay base64) = Binary.put base64
+
 instance Aeson.FromJSON Replay where
   parseJSON = fmap Replay . Aeson.parseJSON
 
@@ -49,28 +56,39 @@ instance Aeson.ToJSON Replay where
 newtype Base64
   = Base64 Bytes.ByteString
 
+instance Binary.Binary Base64 where
+  get = fmap (Base64 . LazyBytes.toStrict) Binary.getRemainingLazyByteString
+  put (Base64 bytes) = Binary.putByteString bytes
+
 instance Aeson.FromJSON Base64 where
   parseJSON = Aeson.withText "Base64"
-    (either fail (pure . Base64) . Base64.decode . Encoding.encodeUtf8)
+    (either fail (pure . Base64) . Base64.decode . Text.encodeUtf8)
 
 instance Aeson.ToJSON Base64 where
   toEncoding (Base64 bytes) =
-    Aeson.toEncoding (Encoding.decodeUtf8 (Base64.encode bytes))
+    Aeson.toEncoding (Text.decodeUtf8 (Base64.encode bytes))
   toJSON (Base64 bytes) =
-    Aeson.toJSON (Encoding.decodeUtf8 (Base64.encode bytes))
+    Aeson.toJSON (Text.decodeUtf8 (Base64.encode bytes))
 
 
 replayToBytes :: Replay -> Bytes.ByteString
-replayToBytes (Replay (Base64 bytes)) = bytes
+replayToBytes = LazyBytes.toStrict . Binary.encode
 
 replayToJson :: Replay -> Bytes.ByteString
 replayToJson = LazyBytes.toStrict . Aeson.encode
 
 replayFromBytes :: Bytes.ByteString -> Either String Replay
-replayFromBytes = Right . Replay . Base64
+replayFromBytes =
+  either (Left . third) (Right . third)
+    . Binary.decodeOrFail
+    . LazyBytes.fromStrict
 
 replayFromJson :: Bytes.ByteString -> Either String Replay
 replayFromJson = Aeson.eitherDecodeStrict'
+
+
+third :: (a, b, c) -> c
+third (_, _, c) = c
 
 
 getInput :: Maybe FilePath -> IO Bytes.ByteString

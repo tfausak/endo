@@ -7,12 +7,15 @@
   - default: false
   - { name: Control.Monad, as: Monad }
   - { name: Data.Aeson, as: Aeson }
+  - { name: Data.Binary, as: Binary }
+  - { name: Data.Binary.Get, as: Binary }
+  - { name: Data.Binary.Put, as: Binary }
   - { name: Data.ByteString, as: Bytes }
   - { name: Data.ByteString.Base64, as: Base64 }
   - { name: Data.ByteString.Lazy, as: LazyBytes }
   - { name: Data.Int, as: Int }
   - { name: Data.Maybe, as: Maybe }
-  - { name: Data.Text.Encoding, as: Encoding }
+  - { name: Data.Text.Encoding, as: Text }
   - { name: Data.Version, as: Version }
   - { name: Endo, as: Endo }
   - { name: Paths_endo, as: Package }
