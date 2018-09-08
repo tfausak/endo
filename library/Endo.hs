@@ -13,7 +13,6 @@ import qualified Paths_endo as Package
 import qualified System.Console.GetOpt as Console
 import qualified System.Environment as Environment
 import qualified System.Exit as Exit
-import qualified System.FilePath as FilePath
 import qualified System.IO as IO
 
 
@@ -102,14 +101,16 @@ getMode config = Maybe.fromMaybe
   (configMode config)
 
 implicitMode :: Config -> Maybe Mode
-implicitMode config =
-  case fmap FilePath.takeExtension (configInputFile config) of
-    Just ".json" -> Just ModeEncode
-    Just ".replay" -> Just ModeDecode
-    _ -> case fmap FilePath.takeExtension (configOutputFile config) of
-      Just ".json" -> Just ModeDecode
-      Just ".replay" -> Just ModeEncode
-      _ -> Nothing
+implicitMode config = case fmap takeExtension (configInputFile config) of
+  Just ".json" -> Just ModeEncode
+  Just ".replay" -> Just ModeDecode
+  _ -> case fmap takeExtension (configOutputFile config) of
+    Just ".json" -> Just ModeDecode
+    Just ".replay" -> Just ModeEncode
+    _ -> Nothing
+
+takeExtension :: FilePath -> String
+takeExtension = dropWhile (/= '.')
 
 
 type Update = Config -> Either String Config

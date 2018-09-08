@@ -5,7 +5,6 @@
   - default: false
 - modules:
   - default: false
-  - { name: Control.Exception, as: Exception }
   - { name: Control.Monad, as: Monad }
   - { name: Data.ByteString, as: Bytes }
   - { name: Data.ByteString.Base64, as: Base64 }
