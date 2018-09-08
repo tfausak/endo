@@ -72,11 +72,8 @@ instance Aeson.ToJSON Replay where
     ]
 
 
-data Section a = Section
-  { sectionSize :: U32
-  , sectionCrc :: U32
-  , sectionValue :: a
-  }
+newtype Section a
+  = Section a
 
 instance Binary.Binary a => Binary.Binary (Section a) where
   get = do
@@ -93,36 +90,28 @@ instance Binary.Binary a => Binary.Binary (Section a) where
         <> show expectedCrc
         )
       )
-    Section size expectedCrc <$> either
+    Section <$> either
       (fail . third)
       (pure . third)
       (Binary.decodeOrFail (LazyBytes.fromStrict bytes))
   put section =
-    Binary.put (sectionSize section)
-      <> Binary.put (sectionCrc section)
-      <> Binary.put (sectionValue section)
+    let
+      bytes =
+        LazyBytes.toStrict (Binary.runPut (Binary.put (unwrapSection section)))
+    in
+      Binary.put (word32ToU32 (intToWord32 (Bytes.length bytes)))
+      <> Binary.put (word32ToU32 (crc32Bytes crc32Table crc32Initial bytes))
+      <> Binary.putByteString bytes
 
 instance Aeson.FromJSON a => Aeson.FromJSON (Section a) where
-  parseJSON = Aeson.withObject
-    "Section"
-    (\object ->
-      Section
-        <$> requiredKey object "size"
-        <*> requiredKey object "crc"
-        <*> requiredKey object "value"
-    )
+  parseJSON = fmap Section . Aeson.parseJSON
 
 instance Aeson.ToJSON a => Aeson.ToJSON (Section a) where
-  toEncoding section = Aeson.pairs
-    (toPair "size" (sectionSize section)
-    <> toPair "crc" (sectionCrc section)
-    <> toPair "value" (sectionValue section)
-    )
-  toJSON section = Aeson.object
-    [ toPair "size" (sectionSize section)
-    , toPair "crc" (sectionCrc section)
-    , toPair "value" (sectionValue section)
-    ]
+  toEncoding = Aeson.toEncoding . unwrapSection
+  toJSON = Aeson.toJSON . unwrapSection
+
+unwrapSection :: Section a -> a
+unwrapSection (Section a) = a
 
 
 newtype U32
@@ -663,6 +652,9 @@ die :: String -> IO a
 die message = do
   warn message
   Exit.exitFailure
+
+intToWord32 :: Int -> Word.Word32
+intToWord32 = fromIntegral
 
 requiredKey :: Aeson.FromJSON v => Aeson.Object -> String -> Aeson.Parser v
 requiredKey object key = object Aeson..: Text.pack key
