@@ -29,41 +29,44 @@ test directory (name, description) = do
   Printf.printf "- %s: %s\n" name description
 
   let
-    originalFile =
+    originalReplayFile =
       FilePath.combine "replays" (FilePath.addExtension name "replay")
-  original <- Bytes.readFile originalFile
-  let originalSize = Bytes.length original
-  Printf.printf "  original size: %d bytes\n" originalSize
+  originalReplay <- Bytes.readFile originalReplayFile
+  let originalReplaySize = Bytes.length originalReplay
+  Printf.printf "  original size: %d bytes\n" originalReplaySize
 
-  ((jsonFile, decodeCount), decodeTime) <- withTime
-    (withAllocationCount (decode directory name originalFile))
+  ((originalJsonFile, decodeCount), decodeTime) <- withTime
+    (withAllocationCount (decode directory name originalReplayFile))
   Printf.printf
     "  decoding allocated: %d bytes (%dx)\n"
     decodeCount
-    (div decodeCount (intToInt64 originalSize))
+    (div decodeCount (intToInt64 originalReplaySize))
   Printf.printf
     "  decoding elapsed: %d nanoseconds (%.3f MBps)\n"
     (Clock.toNanoSecs decodeTime)
-    (mbps originalSize decodeTime)
+    (mbps originalReplaySize decodeTime)
 
-  json <- Bytes.readFile jsonFile
-  Printf.printf "  JSON size: %d bytes\n" (Bytes.length json)
+  originalJson <- Bytes.readFile originalJsonFile
+  let originalJsonSize = Bytes.length originalJson
+  Printf.printf
+    "  JSON size: %d bytes (%.3fx)\n"
+    originalJsonSize
+    (fromIntegral originalJsonSize / fromIntegral originalReplaySize :: Float)
 
-  ((modifiedFile, encodeCount), encodeTime) <- withTime
-    (withAllocationCount (encode directory name jsonFile))
+  ((modifiedReplayFile, encodeCount), encodeTime) <- withTime
+    (withAllocationCount (encode directory name originalJsonFile))
   Printf.printf
     "  encoding allocated: %d bytes (%dx)\n"
     encodeCount
-    (div encodeCount (intToInt64 originalSize))
+    (div encodeCount (intToInt64 originalReplaySize))
   Printf.printf
     "  encoding elapsed: %d nanoseconds (%.3f MBps)\n"
     (Clock.toNanoSecs encodeTime)
-    (mbps originalSize encodeTime)
+    (mbps originalReplaySize encodeTime)
 
-  modified <- Bytes.readFile modifiedFile
-  Printf.printf "  modified size: %d bytes\n" (Bytes.length modified)
-
-  if modified == original
+  modifiedJsonFile <- decode directory name modifiedReplayFile
+  modifiedJson <- Bytes.readFile modifiedJsonFile
+  if modifiedJson == originalJson
     then putStrLn "  round tripping succeeded"
     else Exit.die "  round tripping failed"
 
