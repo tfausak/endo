@@ -4,6 +4,7 @@ version: 0.0.0
 
 category: Game
 description: Endo parses and generates Rocket League replays.
+extra-source-files: README.markdown
 license-file: LICENSE.markdown
 license: MIT
 maintainer: Taylor Fausak
