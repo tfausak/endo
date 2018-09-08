@@ -34,26 +34,36 @@ mainWith name arguments = do
 
 newtype Replay
   = Replay Bytes.ByteString
-  deriving Show
+
+
+replayToBytes :: Replay -> Bytes.ByteString
+replayToBytes (Replay bytes) = bytes
+
+replayToJson :: Replay -> Bytes.ByteString
+replayToJson (Replay bytes) = Base64.encode bytes
+
+replayFromBytes :: Bytes.ByteString -> Either String Replay
+replayFromBytes = Right . Replay
+
+replayFromJson :: Bytes.ByteString -> Either String Replay
+replayFromJson = fmap Replay . Base64.decode
 
 
 getInput :: Maybe FilePath -> IO Bytes.ByteString
 getInput = maybe Bytes.getContents Bytes.readFile
 
 decodeWith :: Mode -> Bytes.ByteString -> Either String Replay
-decodeWith mode bytes = case mode of
-  ModeDecode -> Right (Replay bytes)
-  ModeEncode -> fmap Replay (Base64.decode bytes)
+decodeWith mode = case mode of
+  ModeDecode -> replayFromBytes
+  ModeEncode -> replayFromJson
 
 encodeWith :: Mode -> Replay -> Bytes.ByteString
-encodeWith mode (Replay bytes) = case mode of
-  ModeDecode -> Base64.encode bytes
-  ModeEncode -> bytes
+encodeWith mode = case mode of
+  ModeDecode -> replayToJson
+  ModeEncode -> replayToBytes
 
 putOutput :: Maybe FilePath -> Bytes.ByteString -> IO ()
-putOutput maybeOutputFile output = case maybeOutputFile of
-  Nothing -> Bytes.putStr output
-  Just outputFile -> Bytes.writeFile outputFile output
+putOutput = maybe Bytes.putStr Bytes.writeFile
 
 
 data Config = Config
