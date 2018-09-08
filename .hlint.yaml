@@ -7,6 +7,7 @@
   - default: false
   - { name: Control.Monad, as: Monad }
   - { name: Data.Aeson, as: Aeson }
+  - { name: Data.Aeson.Types, as: Aeson }
   - { name: Data.Binary, as: Binary }
   - { name: Data.Binary.Get, as: Binary }
   - { name: Data.Binary.Put, as: Binary }
@@ -15,12 +16,14 @@
   - { name: Data.ByteString.Lazy, as: LazyBytes }
   - { name: Data.Int, as: Int }
   - { name: Data.Maybe, as: Maybe }
+  - { name: Data.Text, as: Text }
   - { name: Data.Text.Encoding, as: Text }
   - { name: Data.Version, as: Version }
+  - { name: Data.Word, as: Word }
   - { name: Endo, as: Endo }
   - { name: Paths_endo, as: Package }
-  - { name: System.Console.GetOpt, as: Console }
   - { name: System.Clock, as: Clock }
+  - { name: System.Console.GetOpt, as: Console }
   - { name: System.Environment, as: Environment }
   - { name: System.Exit, as: Exit }
   - { name: System.FilePath, as: FilePath }

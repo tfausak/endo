@@ -6,6 +6,7 @@ where
 
 import qualified Control.Monad as Monad
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Types as Aeson
 import qualified Data.Binary as Binary
 import qualified Data.Binary.Get as Binary
 import qualified Data.Binary.Put as Binary
@@ -13,8 +14,10 @@ import qualified Data.ByteString as Bytes
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Lazy as LazyBytes
 import qualified Data.Maybe as Maybe
+import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Version as Version
+import qualified Data.Word as Word
 import qualified Paths_endo as Package
 import qualified System.Console.GetOpt as Console
 import qualified System.Environment as Environment
@@ -38,19 +41,93 @@ mainWith name arguments = do
   putOutput (configOutputFile config) output
 
 
-newtype Replay
-  = Replay Base64
+data Replay = Replay
+  { replayHeader :: Section Base64
+  , replayContent :: Section Base64
+  }
 
 instance Binary.Binary Replay where
-  get = fmap Replay Binary.get
-  put (Replay base64) = Binary.put base64
+  get = Replay <$> Binary.get <*> Binary.get
+  put replay =
+    Binary.put (replayHeader replay) <> Binary.put (replayContent replay)
 
 instance Aeson.FromJSON Replay where
-  parseJSON = fmap Replay . Aeson.parseJSON
+  parseJSON = Aeson.withObject
+    "Replay"
+    (\object ->
+      Replay <$> requiredKey object "header" <*> requiredKey object "content"
+    )
 
 instance Aeson.ToJSON Replay where
-  toEncoding (Replay base64) = Aeson.toEncoding base64
-  toJSON (Replay base64) = Aeson.toJSON base64
+  toEncoding replay = Aeson.pairs
+    (toPair "header" (replayHeader replay)
+    <> toPair "content" (replayContent replay)
+    )
+  toJSON replay = Aeson.object
+    [ toPair "header" (replayHeader replay)
+    , toPair "content" (replayContent replay)
+    ]
+
+
+data Section a = Section
+  { sectionSize :: U32
+  , sectionCrc :: U32
+  , sectionValue :: a
+  }
+
+instance Binary.Binary a => Binary.Binary (Section a) where
+  get = do
+    size <- Binary.get
+    Section size
+      <$> Binary.get
+      <*> Binary.isolate (word32ToInt (u32ToWord32 size)) Binary.get
+  put section =
+    Binary.put (sectionSize section)
+      <> Binary.put (sectionCrc section)
+      <> Binary.put (sectionValue section)
+
+instance Aeson.FromJSON a => Aeson.FromJSON (Section a) where
+  parseJSON = Aeson.withObject
+    "Section"
+    (\object ->
+      Section
+        <$> requiredKey object "size"
+        <*> requiredKey object "crc"
+        <*> requiredKey object "value"
+    )
+
+instance Aeson.ToJSON a => Aeson.ToJSON (Section a) where
+  toEncoding section = Aeson.pairs
+    (toPair "size" (sectionSize section)
+    <> toPair "crc" (sectionCrc section)
+    <> toPair "value" (sectionValue section)
+    )
+  toJSON section = Aeson.object
+    [ toPair "size" (sectionSize section)
+    , toPair "crc" (sectionCrc section)
+    , toPair "value" (sectionValue section)
+    ]
+
+
+newtype U32
+  = U32 Word.Word32
+
+instance Binary.Binary U32 where
+  get = fmap word32ToU32 Binary.getWord32le
+  put = Binary.putWord32le . u32ToWord32
+
+instance Aeson.FromJSON U32 where
+  parseJSON = fmap word32ToU32 . Aeson.parseJSON
+
+instance Aeson.ToJSON U32 where
+  toEncoding = Aeson.toEncoding . u32ToWord32
+  toJSON = Aeson.toJSON . u32ToWord32
+
+word32ToU32 :: Word.Word32 -> U32
+word32ToU32 = U32
+
+u32ToWord32 :: U32 -> Word.Word32
+u32ToWord32 (U32 word32) = word32
 
 
 newtype Base64
@@ -85,10 +162,6 @@ replayFromBytes =
 
 replayFromJson :: Bytes.ByteString -> Either String Replay
 replayFromJson = Aeson.eitherDecodeStrict'
-
-
-third :: (a, b, c) -> c
-third (_, _, c) = c
 
 
 getInput :: Maybe FilePath -> IO Bytes.ByteString
@@ -160,9 +233,6 @@ implicitMode config = case fmap takeExtension (configInputFile config) of
     Just ".json" -> Just ModeDecode
     Just ".replay" -> Just ModeEncode
     _ -> Nothing
-
-takeExtension :: FilePath -> String
-takeExtension = dropWhile (/= '.')
 
 
 type Update = Config -> Either String Config
@@ -294,9 +364,23 @@ die message = do
   warn message
   Exit.exitFailure
 
+requiredKey :: Aeson.FromJSON v => Aeson.Object -> String -> Aeson.Parser v
+requiredKey object key = object Aeson..: Text.pack key
+
+takeExtension :: FilePath -> String
+takeExtension = dropWhile (/= '.')
+
+third :: (a, b, c) -> c
+third (_, _, c) = c
+
+toPair :: (Aeson.ToJSON v, Aeson.KeyValue p) => String -> v -> p
+toPair key value = Text.pack key Aeson..= value
 
 warnLn :: String -> IO ()
 warnLn = IO.hPutStrLn IO.stderr
 
 warn :: String -> IO ()
 warn = IO.hPutStr IO.stderr
+
+word32ToInt :: Word.Word32 -> Int
+word32ToInt = fromIntegral
