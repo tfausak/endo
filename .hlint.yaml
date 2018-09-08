@@ -11,6 +11,7 @@
   - { name: Data.Binary, as: Binary }
   - { name: Data.Binary.Get, as: Binary }
   - { name: Data.Binary.Put, as: Binary }
+  - { name: Data.Bits, as: Bits }
   - { name: Data.ByteString, as: Bytes }
   - { name: Data.ByteString.Base64, as: Base64 }
   - { name: Data.ByteString.Lazy, as: LazyBytes }
@@ -18,6 +19,7 @@
   - { name: Data.Maybe, as: Maybe }
   - { name: Data.Text, as: Text }
   - { name: Data.Text.Encoding, as: Text }
+  - { name: Data.Vector, as: Vector }
   - { name: Data.Version, as: Version }
   - { name: Data.Word, as: Word }
   - { name: Endo, as: Endo }
