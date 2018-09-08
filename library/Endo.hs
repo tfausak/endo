@@ -36,27 +36,38 @@ mainWith name arguments = do
 
 
 newtype Replay
-  = Replay Bytes.ByteString
+  = Replay Base64
 
 instance Aeson.FromJSON Replay where
-  parseJSON = Aeson.withText "Replay"
-    (either fail (pure . Replay) . Base64.decode . Encoding.encodeUtf8)
+  parseJSON = fmap Replay . Aeson.parseJSON
 
 instance Aeson.ToJSON Replay where
-  toEncoding (Replay bytes) =
+  toEncoding (Replay base64) = Aeson.toEncoding base64
+  toJSON (Replay base64) = Aeson.toJSON base64
+
+
+newtype Base64
+  = Base64 Bytes.ByteString
+
+instance Aeson.FromJSON Base64 where
+  parseJSON = Aeson.withText "Base64"
+    (either fail (pure . Base64) . Base64.decode . Encoding.encodeUtf8)
+
+instance Aeson.ToJSON Base64 where
+  toEncoding (Base64 bytes) =
     Aeson.toEncoding (Encoding.decodeUtf8 (Base64.encode bytes))
-  toJSON (Replay bytes) =
+  toJSON (Base64 bytes) =
     Aeson.toJSON (Encoding.decodeUtf8 (Base64.encode bytes))
 
 
 replayToBytes :: Replay -> Bytes.ByteString
-replayToBytes (Replay bytes) = bytes
+replayToBytes (Replay (Base64 bytes)) = bytes
 
 replayToJson :: Replay -> Bytes.ByteString
 replayToJson = LazyBytes.toStrict . Aeson.encode
 
 replayFromBytes :: Bytes.ByteString -> Either String Replay
-replayFromBytes = Right . Replay
+replayFromBytes = Right . Replay . Base64
 
 replayFromJson :: Bytes.ByteString -> Either String Replay
 replayFromJson = Aeson.eitherDecodeStrict'
