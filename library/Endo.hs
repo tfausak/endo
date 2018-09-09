@@ -14,6 +14,7 @@ import qualified Data.Bits as Bits
 import qualified Data.ByteString as Bytes
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Lazy as LazyBytes
+import qualified Data.Function as Function
 import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -37,9 +38,9 @@ main = do
 mainWith :: String -> [String] -> IO ()
 mainWith name arguments = do
   config <- getConfig name arguments
-  input <- getInput (configInputFile config)
+  input <- getInput $ configInputFile config
   let mode = getMode config
-  replay <- either printErrorMessageAndExit pure (decodeWith mode input)
+  replay <- either printErrorMessageAndExit pure $ decodeWith mode input
   let output = encodeWith mode replay
   putOutput (configOutputFile config) output
 
@@ -55,20 +56,17 @@ instance Binary.Binary Replay where
     Binary.put (replayHeader replay) <> Binary.put (replayContent replay)
 
 instance Aeson.FromJSON Replay where
-  parseJSON = Aeson.withObject
-    "Replay"
-    (\object ->
-      Replay <$> requiredKey object "header" <*> requiredKey object "content"
-    )
+  parseJSON = Aeson.withObject "Replay" $ \object ->
+    Replay <$> requiredKey object "header" <*> requiredKey object "content"
 
 instance Aeson.ToJSON Replay where
-  toEncoding replay = Aeson.pairs
-    (toPair "header" (replayHeader replay)
-    <> toPair "content" (replayContent replay)
-    )
+  toEncoding replay =
+    Aeson.pairs $ toPair "header" (replayHeader replay) <> toPair
+      "content"
+      (replayContent replay)
   toJSON replay = Aeson.object
-    [ toPair "header" (replayHeader replay)
-    , toPair "content" (replayContent replay)
+    [ toPair "header" $ replayHeader replay
+    , toPair "content" $ replayContent replay
     ]
 
 
@@ -79,28 +77,25 @@ instance Binary.Binary a => Binary.Binary (Section a) where
   get = Binary.label "Section" $ do
     size <- Binary.get
     expectedCrc <- Binary.get
-    bytes <- Binary.getByteString (word32ToInt (u32ToWord32 size))
-    let actualCrc = crc32Bytes crc32Table crc32Initial bytes
-    Monad.when
-      (actualCrc /= u32ToWord32 expectedCrc)
-      (fail
-        ("actual CRC "
-        <> show (word32ToU32 actualCrc)
-        <> " does not match expected CRC "
-        <> show expectedCrc
-        )
+    bytes <- Binary.getByteString . word32ToInt $ u32ToWord32 size
+    let actualCrc = word32ToU32 $ crc32Bytes crc32Table crc32Initial bytes
+    Monad.when (actualCrc /= expectedCrc) $ fail
+      ("actual CRC "
+      <> show actualCrc
+      <> " does not match expected CRC "
+      <> show expectedCrc
       )
     Section <$> either
       (fail . third)
       (pure . third)
-      (Binary.decodeOrFail (LazyBytes.fromStrict bytes))
+      (Binary.decodeOrFail $ LazyBytes.fromStrict bytes)
   put section =
     let
       bytes =
-        LazyBytes.toStrict (Binary.runPut (Binary.put (unwrapSection section)))
+        LazyBytes.toStrict . Binary.runPut . Binary.put $ unwrapSection section
     in
-      Binary.put (word32ToU32 (intToWord32 (Bytes.length bytes)))
-      <> Binary.put (word32ToU32 (crc32Bytes crc32Table crc32Initial bytes))
+      Binary.put (word32ToU32 . intToWord32 $ Bytes.length bytes)
+      <> Binary.put (word32ToU32 $ crc32Bytes crc32Table crc32Initial bytes)
       <> Binary.putByteString bytes
 
 instance Aeson.FromJSON a => Aeson.FromJSON (Section a) where
@@ -129,25 +124,22 @@ instance Binary.Binary Header where
       <> Binary.put (headerRest header)
 
 instance Aeson.FromJSON Header where
-  parseJSON = Aeson.withObject
-    "Header"
-    (\object ->
-      Header
-        <$> requiredKey object "majorVersion"
-        <*> requiredKey object "minorVersion"
-        <*> requiredKey object "rest"
-    )
+  parseJSON = Aeson.withObject "Header" $ \object ->
+    Header
+      <$> requiredKey object "majorVersion"
+      <*> requiredKey object "minorVersion"
+      <*> requiredKey object "rest"
 
 instance Aeson.ToJSON Header where
-  toEncoding header = Aeson.pairs
-    (toPair "majorVersion" (headerMajorVersion header)
-    <> toPair "minorVersion" (headerMinorVersion header)
-    <> toPair "rest" (headerRest header)
-    )
+  toEncoding header =
+    Aeson.pairs
+      $ toPair "majorVersion" (headerMajorVersion header)
+      <> toPair "minorVersion" (headerMinorVersion header)
+      <> toPair "rest" (headerRest header)
   toJSON header = Aeson.object
-    [ toPair "majorVersion" (headerMajorVersion header)
-    , toPair "minorVersion" (headerMinorVersion header)
-    , toPair "rest" (headerRest header)
+    [ toPair "majorVersion" $ headerMajorVersion header
+    , toPair "minorVersion" $ headerMinorVersion header
+    , toPair "rest" $ headerRest header
     ]
 
 
@@ -155,7 +147,7 @@ newtype Content
   = Content Base64
 
 instance Binary.Binary Content where
-  get = fmap Content Binary.get
+  get = Content <$> Binary.get
   put = Binary.put . unwrapContent
 
 instance Aeson.FromJSON Content where
@@ -173,8 +165,11 @@ newtype U32
   = U32 Word.Word32
 
 instance Binary.Binary U32 where
-  get = fmap word32ToU32 Binary.getWord32le
+  get = word32ToU32 <$> Binary.getWord32le
   put = Binary.putWord32le . u32ToWord32
+
+instance Eq U32 where
+  (==) = Function.on (==) u32ToWord32
 
 instance Aeson.FromJSON U32 where
   parseJSON = fmap word32ToU32 . Aeson.parseJSON
@@ -197,18 +192,22 @@ newtype Base64
   = Base64 Bytes.ByteString
 
 instance Binary.Binary Base64 where
-  get = fmap (Base64 . LazyBytes.toStrict) Binary.getRemainingLazyByteString
-  put (Base64 bytes) = Binary.putByteString bytes
+  get = Base64 . LazyBytes.toStrict <$> Binary.getRemainingLazyByteString
+  put = Binary.putByteString . unwrapBase64
 
 instance Aeson.FromJSON Base64 where
-  parseJSON = Aeson.withText "Base64"
-    (either fail (pure . Base64) . Base64.decode . Text.encodeUtf8)
+  parseJSON =
+    Aeson.withText "Base64"
+      $ either fail (pure . Base64)
+      . Base64.decode
+      . Text.encodeUtf8
 
 instance Aeson.ToJSON Base64 where
-  toEncoding (Base64 bytes) =
-    Aeson.toEncoding (Text.decodeUtf8 (Base64.encode bytes))
-  toJSON (Base64 bytes) =
-    Aeson.toJSON (Text.decodeUtf8 (Base64.encode bytes))
+  toEncoding = Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . unwrapBase64
+  toJSON = Aeson.toJSON . Text.decodeUtf8 . Base64.encode . unwrapBase64
+
+unwrapBase64 :: Base64 -> Bytes.ByteString
+unwrapBase64 (Base64 bytes) = bytes
 
 
 replayToBinary :: Replay -> Bytes.ByteString
@@ -255,11 +254,9 @@ data Config = Config
 getConfig :: String -> [String] -> IO Config
 getConfig name arguments = do
   updates <- getUpdates arguments
-  config <- either
-    printErrorMessageAndExit
-    pure
-    (applyUpdates defaultConfig updates)
-  Monad.when (configShowHelp config) (printHelpAndExit name)
+  config <- either printErrorMessageAndExit pure
+    $ applyUpdates defaultConfig updates
+  Monad.when (configShowHelp config) $ printHelpAndExit name
   Monad.when (configShowVersion config) printVersionAndExit
   pure config
 
@@ -281,18 +278,18 @@ parseMode :: String -> Either String Mode
 parseMode mode = case mode of
   "decode" -> Right ModeDecode
   "encode" -> Right ModeEncode
-  _ -> Left ("invalid mode `" <> mode <> "'")
+  _ -> Left $ "invalid mode `" <> mode <> "'"
 
 getMode :: Config -> Mode
-getMode config = Maybe.fromMaybe
-  (Maybe.fromMaybe ModeDecode (implicitMode config))
-  (configMode config)
+getMode config =
+  Maybe.fromMaybe (Maybe.fromMaybe ModeDecode $ implicitMode config)
+    $ configMode config
 
 implicitMode :: Config -> Maybe Mode
-implicitMode config = case fmap takeExtension (configInputFile config) of
+implicitMode config = case takeExtension <$> configInputFile config of
   Just ".json" -> Just ModeEncode
   Just ".replay" -> Just ModeDecode
-  _ -> case fmap takeExtension (configOutputFile config) of
+  _ -> case takeExtension <$> configOutputFile config of
     Just ".json" -> Just ModeDecode
     Just ".replay" -> Just ModeEncode
     _ -> Nothing
@@ -320,54 +317,46 @@ applyUpdate config update = update config
 
 type Option = Console.OptDescr Update
 
+makeOption :: String -> [String] -> String -> Argument -> Option
+makeOption short long description argument =
+  Console.Option short long argument description
+
+type Argument = Console.ArgDescr Update
+
+makeArgument :: String -> (String -> Update) -> Argument
+makeArgument = flip Console.ReqArg
+
 options :: [Option]
 options = [helpOption, inputOption, modeOption, outputOption, versionOption]
 
 helpOption :: Option
-helpOption = Console.Option
-  ['h', '?']
-  ["help"]
-  (Console.NoArg (\config -> Right config { configShowHelp = True }))
-  "show the help"
+helpOption =
+  makeOption "h?" ["help"] "show the help" . Console.NoArg $ \config ->
+    Right config { configShowHelp = True }
 
 inputOption :: Option
-inputOption = Console.Option
-  ['i']
-  ["input"]
-  (Console.ReqArg
-    (\input config -> Right config { configInputFile = Just input })
-    "FILE"
-  )
-  "the input file"
+inputOption =
+  makeOption "i" ["input"] "the input file"
+    . makeArgument "FILE"
+    $ \input config -> Right config { configInputFile = Just input }
 
 modeOption :: Option
-modeOption = Console.Option
-  ['m']
-  ["mode"]
-  (Console.ReqArg
-    (\string config ->
-      fmap (\mode -> config { configMode = Just mode }) (parseMode string)
-    )
-    "MODE"
-  )
-  "decode or encode"
+modeOption =
+  makeOption "m" ["mode"] "decode or encode"
+    . makeArgument "MODE"
+    $ \string config ->
+        (\mode -> config { configMode = Just mode }) <$> parseMode string
 
 outputOption :: Option
-outputOption = Console.Option
-  ['o']
-  ["output"]
-  (Console.ReqArg
-    (\output config -> Right config { configOutputFile = Just output })
-    "FILE"
-  )
-  "the output file"
+outputOption =
+  makeOption "o" ["output"] "the output file"
+    . makeArgument "FILE"
+    $ \output config -> Right config { configOutputFile = Just output }
 
 versionOption :: Option
-versionOption = Console.Option
-  ['v']
-  ["version"]
-  (Console.NoArg (\config -> Right config { configShowVersion = True }))
-  "show the version"
+versionOption =
+  makeOption "v" ["version"] "show the version" . Console.NoArg $ \config ->
+    Right config { configShowVersion = True }
 
 
 printUnrecognizedOptions :: [String] -> IO ()
@@ -694,7 +683,7 @@ crc32Update
   :: Vector.Vector Word.Word32 -> Word.Word32 -> Word.Word8 -> Word.Word32
 crc32Update table crc byte = do
   let
-    index = word8ToInt (Bits.xor byte (word32ToWord8 (Bits.shiftR crc 24)))
+    index = word8ToInt . Bits.xor byte . word32ToWord8 $ Bits.shiftR crc 24
     left = table Vector.! index
     right = Bits.shiftL crc 8
   Bits.xor left right

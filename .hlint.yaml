@@ -15,6 +15,7 @@
   - { name: Data.ByteString, as: Bytes }
   - { name: Data.ByteString.Base64, as: Base64 }
   - { name: Data.ByteString.Lazy, as: LazyBytes }
+  - { name: Data.Function, as: Function }
   - { name: Data.Int, as: Int }
   - { name: Data.Maybe, as: Maybe }
   - { name: Data.Text, as: Text }
