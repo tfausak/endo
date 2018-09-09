@@ -45,8 +45,8 @@ mainWith name arguments = do
 
 
 data Replay = Replay
-  { replayHeader :: Section Base64
-  , replayContent :: Section Base64
+  { replayHeader :: Section Header
+  , replayContent :: Section Content
   }
 
 instance Binary.Binary Replay where
@@ -112,6 +112,42 @@ instance Aeson.ToJSON a => Aeson.ToJSON (Section a) where
 
 unwrapSection :: Section a -> a
 unwrapSection (Section a) = a
+
+
+newtype Header
+  = Header Base64
+
+instance Binary.Binary Header where
+  get = fmap Header Binary.get
+  put = Binary.put . unwrapHeader
+
+instance Aeson.FromJSON Header where
+  parseJSON = fmap Header . Aeson.parseJSON
+
+instance Aeson.ToJSON Header where
+  toEncoding = Aeson.toEncoding . unwrapHeader
+  toJSON = Aeson.toJSON . unwrapHeader
+
+unwrapHeader :: Header -> Base64
+unwrapHeader (Header base64) = base64
+
+
+newtype Content
+  = Content Base64
+
+instance Binary.Binary Content where
+  get = fmap Content Binary.get
+  put = Binary.put . unwrapContent
+
+instance Aeson.FromJSON Content where
+  parseJSON = fmap Content . Aeson.parseJSON
+
+instance Aeson.ToJSON Content where
+  toEncoding = Aeson.toEncoding . unwrapContent
+  toJSON = Aeson.toJSON . unwrapContent
+
+unwrapContent :: Content -> Base64
+unwrapContent (Content base64) = base64
 
 
 newtype U32
