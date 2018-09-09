@@ -156,14 +156,14 @@ instance Aeson.ToJSON Base64 where
     Aeson.toJSON (Text.decodeUtf8 (Base64.encode bytes))
 
 
-replayToBytes :: Replay -> Bytes.ByteString
-replayToBytes = LazyBytes.toStrict . Binary.encode
+replayToBinary :: Replay -> Bytes.ByteString
+replayToBinary = LazyBytes.toStrict . Binary.encode
 
 replayToJson :: Replay -> Bytes.ByteString
 replayToJson = LazyBytes.toStrict . Aeson.encode
 
-replayFromBytes :: Bytes.ByteString -> Either String Replay
-replayFromBytes =
+replayFromBinary :: Bytes.ByteString -> Either String Replay
+replayFromBinary =
   either (Left . third) (Right . third)
     . Binary.decodeOrFail
     . LazyBytes.fromStrict
@@ -177,13 +177,13 @@ getInput = maybe Bytes.getContents Bytes.readFile
 
 decodeWith :: Mode -> Bytes.ByteString -> Either String Replay
 decodeWith mode = case mode of
-  ModeDecode -> replayFromBytes
+  ModeDecode -> replayFromBinary
   ModeEncode -> replayFromJson
 
 encodeWith :: Mode -> Replay -> Bytes.ByteString
 encodeWith mode = case mode of
   ModeDecode -> replayToJson
-  ModeEncode -> replayToBytes
+  ModeEncode -> replayToBinary
 
 putOutput :: Maybe FilePath -> Bytes.ByteString -> IO ()
 putOutput = maybe Bytes.putStr Bytes.writeFile
