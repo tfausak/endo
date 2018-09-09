@@ -50,7 +50,7 @@ data Replay = Replay
   }
 
 instance Binary.Binary Replay where
-  get = Replay <$> Binary.get <*> Binary.get
+  get = Binary.label "Replay" $ Replay <$> Binary.get <*> Binary.get
   put replay =
     Binary.put (replayHeader replay) <> Binary.put (replayContent replay)
 
@@ -76,7 +76,7 @@ newtype Section a
   = Section a
 
 instance Binary.Binary a => Binary.Binary (Section a) where
-  get = do
+  get = Binary.label "Section" $ do
     size <- Binary.get
     expectedCrc <- Binary.get
     bytes <- Binary.getByteString (word32ToInt (u32ToWord32 size))
@@ -121,7 +121,8 @@ data Header = Header
   }
 
 instance Binary.Binary Header where
-  get = Header <$> Binary.get <*> Binary.get <*> Binary.get
+  get =
+    Binary.label "Header" $ Header <$> Binary.get <*> Binary.get <*> Binary.get
   put header =
     Binary.put (headerMajorVersion header)
       <> Binary.put (headerMinorVersion header)
