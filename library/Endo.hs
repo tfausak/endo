@@ -14,7 +14,6 @@ import qualified Data.Bits as Bits
 import qualified Data.ByteString as Bytes
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Lazy as LazyBytes
-import qualified Data.Function as Function
 import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -79,12 +78,11 @@ instance Binary.Binary a => Binary.Binary (Section a) where
     expectedCrc <- Binary.get
     bytes <- Binary.getByteString . word32ToInt $ u32ToWord32 size
     let actualCrc = word32ToU32 $ crc32Bytes crc32Table crc32Initial bytes
-    Monad.when (actualCrc /= expectedCrc) $ fail
-      ("actual CRC "
+    Monad.when (u32ToWord32 actualCrc /= u32ToWord32 expectedCrc) . fail
+      $ "actual CRC "
       <> show actualCrc
       <> " does not match expected CRC "
       <> show expectedCrc
-      )
     Section <$> either
       (fail . third)
       (pure . third)
@@ -112,15 +110,21 @@ unwrapSection (Section a) = a
 data Header = Header
   { headerMajorVersion :: U32
   , headerMinorVersion :: U32
+  , headerPatchVersion :: Optional U32
   , headerRest :: Base64
   }
 
 instance Binary.Binary Header where
-  get =
-    Binary.label "Header" $ Header <$> Binary.get <*> Binary.get <*> Binary.get
+  get = Binary.label "Header" $ do
+    majorVersion <- Binary.get
+    minorVersion <- Binary.get
+    Header majorVersion minorVersion
+      <$> getOptional (hasPatchVersion majorVersion minorVersion)
+      <*> Binary.get
   put header =
     Binary.put (headerMajorVersion header)
       <> Binary.put (headerMinorVersion header)
+      <> putOptional (headerPatchVersion header)
       <> Binary.put (headerRest header)
 
 instance Aeson.FromJSON Header where
@@ -128,6 +132,7 @@ instance Aeson.FromJSON Header where
     Header
       <$> requiredKey object "majorVersion"
       <*> requiredKey object "minorVersion"
+      <*> optionalKey object "patchVersion"
       <*> requiredKey object "rest"
 
 instance Aeson.ToJSON Header where
@@ -135,12 +140,18 @@ instance Aeson.ToJSON Header where
     Aeson.pairs
       $ toPair "majorVersion" (headerMajorVersion header)
       <> toPair "minorVersion" (headerMinorVersion header)
+      <> toPair "patchVersion" (headerPatchVersion header)
       <> toPair "rest" (headerRest header)
   toJSON header = Aeson.object
     [ toPair "majorVersion" $ headerMajorVersion header
     , toPair "minorVersion" $ headerMinorVersion header
+    , toPair "patchVersion" $ headerPatchVersion header
     , toPair "rest" $ headerRest header
     ]
+
+hasPatchVersion :: U32 -> U32 -> Bool
+hasPatchVersion majorVersion minorVersion =
+  u32ToWord32 majorVersion >= 868 && u32ToWord32 minorVersion >= 18
 
 
 newtype Content
@@ -161,15 +172,33 @@ unwrapContent :: Content -> Base64
 unwrapContent (Content base64) = base64
 
 
+newtype Optional a
+  = Optional (Maybe a)
+
+instance Aeson.ToJSON a => Aeson.ToJSON (Optional a) where
+  toEncoding = Aeson.toEncoding . optionalToMaybe
+  toJSON = Aeson.toJSON . optionalToMaybe
+
+optionalToMaybe :: Optional a -> Maybe a
+optionalToMaybe (Optional a) = a
+
+maybeToOptional :: Maybe a -> Optional a
+maybeToOptional = Optional
+
+getOptional :: Binary.Binary a => Bool -> Binary.Get (Optional a)
+getOptional condition =
+  maybeToOptional <$> if condition then Just <$> Binary.get else pure Nothing
+
+putOptional :: Binary.Binary a => Optional a -> Binary.Put
+putOptional = maybe mempty Binary.put . optionalToMaybe
+
+
 newtype U32
   = U32 Word.Word32
 
 instance Binary.Binary U32 where
   get = word32ToU32 <$> Binary.getWord32le
   put = Binary.putWord32le . u32ToWord32
-
-instance Eq U32 where
-  (==) = Function.on (==) u32ToWord32
 
 instance Aeson.FromJSON U32 where
   parseJSON = fmap word32ToU32 . Aeson.parseJSON
@@ -699,6 +728,10 @@ die message = do
 
 intToWord32 :: Int -> Word.Word32
 intToWord32 = fromIntegral
+
+optionalKey
+  :: Aeson.FromJSON v => Aeson.Object -> String -> Aeson.Parser (Optional v)
+optionalKey object key = maybeToOptional <$> object Aeson..:? Text.pack key
 
 requiredKey :: Aeson.FromJSON v => Aeson.Object -> String -> Aeson.Parser v
 requiredKey object key = object Aeson..: Text.pack key
