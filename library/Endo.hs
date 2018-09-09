@@ -116,29 +116,36 @@ unwrapSection (Section a) = a
 
 data Header = Header
   { headerMajorVersion :: U32
+  , headerMinorVersion :: U32
   , headerRest :: Base64
   }
 
 instance Binary.Binary Header where
-  get = Header <$> Binary.get <*> Binary.get
+  get = Header <$> Binary.get <*> Binary.get <*> Binary.get
   put header =
-    Binary.put (headerMajorVersion header) <> Binary.put (headerRest header)
+    Binary.put (headerMajorVersion header)
+      <> Binary.put (headerMinorVersion header)
+      <> Binary.put (headerRest header)
 
 instance Aeson.FromJSON Header where
   parseJSON = Aeson.withObject
     "Header"
-    (\object -> Header <$> requiredKey object "majorVersion" <*> requiredKey
-      object
-      "rest"
+    (\object ->
+      Header
+        <$> requiredKey object "majorVersion"
+        <*> requiredKey object "minorVersion"
+        <*> requiredKey object "rest"
     )
 
 instance Aeson.ToJSON Header where
   toEncoding header = Aeson.pairs
     (toPair "majorVersion" (headerMajorVersion header)
+    <> toPair "minorVersion" (headerMinorVersion header)
     <> toPair "rest" (headerRest header)
     )
   toJSON header = Aeson.object
     [ toPair "majorVersion" (headerMajorVersion header)
+    , toPair "minorVersion" (headerMinorVersion header)
     , toPair "rest" (headerRest header)
     ]
 
