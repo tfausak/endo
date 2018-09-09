@@ -1,6 +1,58 @@
+-- | Endo parses and generates [Rocket League](https://www.rocketleague.com)
+-- replays. Parsing replays can be used to analyze data in order to collect
+-- high-level statistics like players and points, or low-level details like
+-- positions and cameras. Generating replays can be used to modify replays in
+-- order to force everyone into the same car or change the map a game was
+-- played on.
+--
+-- Endo supports every version of Rocket League up to 1.52, also known as the
+-- "progression update". If a replay can be played by the Rocket League client,
+-- it can be parsed by Endo.
+--
+-- Endo is a command-line application. You should only use it if you're
+-- comfortable running things in terminals or command prompts. Otherwise
+-- consider using another tool like [Ball Chasing](https://ballchasing.com).
+--
+-- If you're looking for replay files on your machine, they can be found in the
+-- following directories:
+--
+-- [Windows]: [ ](#haddock-requires-something-here)
+--
+--     > %UserProfile%\Documents\My Games\Rocket League\TAGame\Demos
+--
+--     For example:
+--
+--     > C:\Users\Taylor\Documents\My Games\Rocket League\TAGame\Demos
+--
+-- [MacOS]: [ ](#haddock-requires-something-here)
+--
+--     > $HOME/Library/Application Support/Rocket League/TAGame/Demos
+--
+--     For example:
+--
+--     > /Users/taylor/Library/Application Support/Rocket League/TAGame/Demos
+--
+-- [Linux]: [ ](#haddock-requires-something-here)
+--
+--     > $HOME/.local/share/Rocket League/TAGame/Demos
+--
+--     For example:
+--
+--     > /home/taylor/.local/share/Rocket League/TAGame/Demos
 module Endo
   ( main
   , mainWith
+  , replayFromBinary
+  , replayToJson
+  , replayFromJson
+  , replayToBinary
+  , Replay(..)
+  , Section(..)
+  , Header(..)
+  , Content(..)
+  , Optional(..)
+  , U32(..)
+  , Base64(..)
   )
 where
 
@@ -14,6 +66,7 @@ import qualified Data.Bits as Bits
 import qualified Data.ByteString as Bytes
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Lazy as LazyBytes
+import qualified Data.List as List
 import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -28,13 +81,93 @@ import qualified System.IO as IO
 import qualified Text.Printf as Printf
 
 
+-- | == Options
+--
+-- Endo accepts a variety of command-line options. Usually you only need to
+-- specify the @--input@ option and sometimes the @--output@ option.
+--
+-- [@--help@, @-h@, @-?@] Prints Endo's help to 'IO.stderr' and exits with a
+-- non-zero status code.
+--
+-- [@--version@, @-v@] Prints Endo's version number to 'IO.stderr' and exits
+-- with a non-zero status code.
+--
+-- [@--input FILE@, @-i FILE@] Specifies the input file. If this option is not
+-- given, input will be read from 'IO.stdin'.
+--
+-- [@--output FILE@, @-o FILE@] Specifies the output file. If this option is
+-- not given, output will be written to 'IO.stdout'.
+--
+-- [@--mode MODE@, @-m MODE@] Specifies the mode, either @decode@ or @encode@.
+--
+--     -   @decode@ converts a binary @.replay@ file into JSON. In other words,
+--         first it calls 'replayFromBinary' and then it calls 'replayToJson'.
+--
+--     -   @encode@ does the opposite; it converts JSON into a binary @.replay@
+--         file. In other words, first it calls 'replayFromJson' and then it
+--         calls 'replayToBinary'.
+--
+--     Usually you do not need to manually set the mode. If this option is not
+--     given, the mode is chosen automatically following these rules:
+--
+--      1.  If the input file ends with @.json@: @encode@.
+--      2.  If the input file ends with @.replay@: @decode@.
+--      3.  If the output file ends with @.json@: @decode@.
+--      4.  If the output file ends with @.replay@: @encode@.
+--      5.  Otherwise: @decode@.
+--
+-- == Examples
+--
+-- Each group of examples shows many ways to do the same thing. If you're
+-- running Endo on Windows, you should prefer @--input INPUT@ and
+-- @--output OUTPUT@ to @< INPUT@ and @> OUTPUT@ respectively. Windows attempts
+-- to encode pipes as UTF-16, which can give unexpected results.
+--
+-- > $ endo < example.replay > example.json
+-- > $ endo -i example.replay -o example.json
+-- > $ endo --mode decode --input example.replay --output example.json
+--
+-- Decodes a binary replay file and outputs a JSON replay file. This is by far
+-- the most common way to use Endo.
+--
+-- > $ endo < example.replay
+-- > $ endo -i example.replay
+-- > $ endo --mode decode --input example.replay
+--
+-- Decodes a binary replay file and outputs JSON replay to 'IO.stdout'. Note
+-- that in the first example @--mode@ is optional because the default mode is
+-- @decode@.
+--
+-- > $ endo -m encode < example.json > example.replay
+-- > $ endo -i example.json -o example.replay
+-- > $ endo --mode encode --input example.json --output example.replay
+--
+-- Encodes a JSON replay file and outputs a binary replay file.
+--
+-- > $ endo -m encode < example.json
+-- > $ endo -i example.json
+-- > $ endo --mode encode --input example.json
+--
+-- Encodes a JSON replay file and outputs a binary replay to 'IO.stdout'. Note
+-- that in the first example @--mode@ is required, otherwise it would default
+-- to @decode@. Endo does not know the name of the file piped to 'IO.stdin'.
 main :: IO ()
 main = do
   name <- Environment.getProgName
   arguments <- Environment.getArgs
   mainWith name arguments
 
-mainWith :: String -> [String] -> IO ()
+-- | This helper function allows you to call 'main' as if it was a function
+-- with whatever arguments you want. This is primarily used for testing.
+mainWith
+  :: String
+  -- ^ Program name, like @"endo"@. This is only used when outputting the help,
+  -- so you can pass the empty string if you don't need to show the help.
+  -- Otherwise this usually comes from 'Environment.getProgName'.
+  -> [String]
+  -- ^ Command-line arguments, like @["--input", "example.replay"]@. These
+  -- usually come from 'Environment.getArgs'.
+  -> IO ()
 mainWith name arguments = do
   config <- getConfig name arguments
   input <- getInput $ configInputFile config
@@ -44,6 +177,35 @@ mainWith name arguments = do
   putOutput (configOutputFile config) output
 
 
+-- | Decodes a binary replay. This is the opposite of 'replayToBinary'. Note
+-- that converting from binary and then back to binary is /not/ guaranteed to
+-- give you back what you started with (unlike 'replayFromJson'). The result
+-- should be effectively the same, but the actual bytes might differ slightly.
+replayFromBinary :: Bytes.ByteString -> Either String Replay
+replayFromBinary =
+  either (Left . third) (Right . third)
+    . Binary.decodeOrFail
+    . LazyBytes.fromStrict
+
+-- | Encodes a JSON replay. This is the opposite of 'replayFromJson'.
+replayToJson :: Replay -> Bytes.ByteString
+replayToJson = LazyBytes.toStrict . Aeson.encode
+
+-- | Decodes a JSON replay. This is the opposite of 'replayToJson'. Note that
+-- converting from JSON and then back to JSON /is/ guaranteed to give you back
+-- what you started with (unlike 'replayFromBinary').
+replayFromJson :: Bytes.ByteString -> Either String Replay
+replayFromJson = Aeson.eitherDecodeStrict'
+
+-- | Encodes a binary replay. This is the opposite of 'replayFromBinary'.
+replayToBinary :: Replay -> Bytes.ByteString
+replayToBinary = LazyBytes.toStrict . Binary.encode
+
+
+-- | A Rocket League replay. Most of the information you'll usually want, like
+-- the stuff shown on the scoreboard, is in the 'Header'. You'll typically only
+-- need the 'Content' if you want to analyze the game data that's sent over the
+-- network.
 data Replay = Replay
   { replayHeader :: Section Header
   , replayContent :: Section Content
@@ -69,6 +231,9 @@ instance Aeson.ToJSON Replay where
     ]
 
 
+-- | A high-level section of a replay. Rocket League replays are split up into
+-- two sections, each with a size and CRC. The instances for this type handle
+-- the size and CRC so that you don't have to worry about them.
 newtype Section a
   = Section a
 
@@ -107,10 +272,19 @@ unwrapSection :: Section a -> a
 unwrapSection (Section a) = a
 
 
+-- | The header or "meta" replay information. This includes everything that is
+-- shown in the in-game replay menu and then some.
 data Header = Header
   { headerMajorVersion :: U32
+  -- ^ The major or "engine" version number. Note that this isn't the same as
+  -- Rocket League's marketing version number, which is usually something like
+  -- "v1.52". You may be able to convert between the two, but there's no
+  -- guarantee that it's a one-to-one mapping.
   , headerMinorVersion :: U32
+  -- ^ The minor or "licensee" version number.
   , headerPatchVersion :: Optional U32
+  -- ^ The patch or "net" version number. Replays before v1.35 (the
+  -- "anniversary update") don't have this field.
   , headerRest :: Base64
   }
 
@@ -154,6 +328,8 @@ hasPatchVersion majorVersion minorVersion =
   u32ToWord32 majorVersion >= 868 && u32ToWord32 minorVersion >= 18
 
 
+-- | The content or "data" replay information. This includes everything that is
+-- shown when watching a replay in game.
 newtype Content
   = Content Base64
 
@@ -172,6 +348,12 @@ unwrapContent :: Content -> Base64
 unwrapContent (Content base64) = base64
 
 
+-- | A value that may or may not exist. This type mostly exists to /avoid/ the
+-- 'Binary.Binary' and 'Aeson.FromJSON' instances for 'Maybe'. The
+-- 'Binary.Binary' instance is troublesome because in Rocket League replays
+-- typically the lack of a value is not encoded at all. The 'Aeson.FromJSON'
+-- instance is troublesome because missing a key is treated differently than a
+-- key existing but the value being 'Aeson.Null'.
 newtype Optional a
   = Optional (Maybe a)
 
@@ -193,6 +375,7 @@ putOptional :: Binary.Binary a => Optional a -> Binary.Put
 putOptional = maybe mempty Binary.put . optionalToMaybe
 
 
+-- | A 32-bit unsigned integer stored in little-endian byte order.
 newtype U32
   = U32 Word.Word32
 
@@ -232,27 +415,12 @@ instance Aeson.FromJSON Base64 where
       . Text.encodeUtf8
 
 instance Aeson.ToJSON Base64 where
-  toEncoding = Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . unwrapBase64
+  toEncoding =
+    Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . unwrapBase64
   toJSON = Aeson.toJSON . Text.decodeUtf8 . Base64.encode . unwrapBase64
 
 unwrapBase64 :: Base64 -> Bytes.ByteString
 unwrapBase64 (Base64 bytes) = bytes
-
-
-replayToBinary :: Replay -> Bytes.ByteString
-replayToBinary = LazyBytes.toStrict . Binary.encode
-
-replayToJson :: Replay -> Bytes.ByteString
-replayToJson = LazyBytes.toStrict . Aeson.encode
-
-replayFromBinary :: Bytes.ByteString -> Either String Replay
-replayFromBinary =
-  either (Left . third) (Right . third)
-    . Binary.decodeOrFail
-    . LazyBytes.fromStrict
-
-replayFromJson :: Bytes.ByteString -> Either String Replay
-replayFromJson = Aeson.eitherDecodeStrict'
 
 
 getInput :: Maybe FilePath -> IO Bytes.ByteString
@@ -315,12 +483,14 @@ getMode config =
     $ configMode config
 
 implicitMode :: Config -> Maybe Mode
-implicitMode config = case takeExtension <$> configInputFile config of
-  Just ".json" -> Just ModeEncode
-  Just ".replay" -> Just ModeDecode
-  _ -> case takeExtension <$> configOutputFile config of
-    Just ".json" -> Just ModeDecode
-    Just ".replay" -> Just ModeEncode
+implicitMode config = case configInputFile config of
+  Just inputFile
+    | hasExtension ".json" inputFile -> Just ModeEncode
+    | hasExtension ".replay" inputFile -> Just ModeDecode
+  _ -> case configOutputFile config of
+    Just outputFile
+      | hasExtension ".json" outputFile -> Just ModeDecode
+      | hasExtension ".replay" outputFile -> Just ModeEncode
     _ -> Nothing
 
 
@@ -427,7 +597,7 @@ printHelpAndExit :: String -> IO a
 printHelpAndExit = die . help
 
 help :: String -> String
-help name = Console.usageInfo name options
+help name = Console.usageInfo (name <> " version " <> version) options
 
 
 printVersionAndExit :: IO a
@@ -726,6 +896,9 @@ die message = do
   warn message
   Exit.exitFailure
 
+hasExtension :: String -> FilePath -> Bool
+hasExtension = List.isSuffixOf
+
 intToWord32 :: Int -> Word.Word32
 intToWord32 = fromIntegral
 
@@ -735,9 +908,6 @@ optionalKey object key = maybeToOptional <$> object Aeson..:? Text.pack key
 
 requiredKey :: Aeson.FromJSON v => Aeson.Object -> String -> Aeson.Parser v
 requiredKey object key = object Aeson..: Text.pack key
-
-takeExtension :: FilePath -> String
-takeExtension = dropWhile (/= '.')
 
 third :: (a, b, c) -> c
 third (_, _, c) = c
