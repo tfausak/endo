@@ -114,22 +114,33 @@ unwrapSection :: Section a -> a
 unwrapSection (Section a) = a
 
 
-newtype Header
-  = Header Base64
+data Header = Header
+  { headerMajorVersion :: U32
+  , headerRest :: Base64
+  }
 
 instance Binary.Binary Header where
-  get = fmap Header Binary.get
-  put = Binary.put . unwrapHeader
+  get = Header <$> Binary.get <*> Binary.get
+  put header =
+    Binary.put (headerMajorVersion header) <> Binary.put (headerRest header)
 
 instance Aeson.FromJSON Header where
-  parseJSON = fmap Header . Aeson.parseJSON
+  parseJSON = Aeson.withObject
+    "Header"
+    (\object -> Header <$> requiredKey object "majorVersion" <*> requiredKey
+      object
+      "rest"
+    )
 
 instance Aeson.ToJSON Header where
-  toEncoding = Aeson.toEncoding . unwrapHeader
-  toJSON = Aeson.toJSON . unwrapHeader
-
-unwrapHeader :: Header -> Base64
-unwrapHeader (Header base64) = base64
+  toEncoding header = Aeson.pairs
+    (toPair "majorVersion" (headerMajorVersion header)
+    <> toPair "rest" (headerRest header)
+    )
+  toJSON header = Aeson.object
+    [ toPair "majorVersion" (headerMajorVersion header)
+    , toPair "rest" (headerRest header)
+    ]
 
 
 newtype Content
