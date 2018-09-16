@@ -3,9 +3,12 @@
   - default: false
 - extensions:
   - default: false
+  - name: OverloadedStrings
 - modules:
   - default: false
   - { name: Control.Monad, as: Monad }
+  - { name: Control.Monad.Trans.Class, as: Trans }
+  - { name: Control.Monad.Trans.State.Strict, as: State }
   - { name: Data.Aeson, as: Aeson }
   - { name: Data.Aeson.Encoding, as: Aeson }
   - { name: Data.Aeson.Types, as: Aeson }
@@ -18,6 +21,7 @@
   - { name: Data.ByteString.Char8, as: Latin1 }
   - { name: Data.ByteString.Lazy, as: LazyBytes }
   - { name: Data.Char, as: Char }
+  - { name: Data.HashMap.Strict, as: HashMap }
   - { name: Data.Int, as: Int }
   - { name: Data.List, as: List }
   - { name: Data.Maybe, as: Maybe }
@@ -37,6 +41,7 @@
   - { name: System.IO.Temp, as: Temp }
   - { name: System.Mem, as: Mem }
   - { name: Text.Printf, as: Printf }
+  - { name: Unsafe.Coerce, as: Unsafe }
 - functions:
   - default: true
 

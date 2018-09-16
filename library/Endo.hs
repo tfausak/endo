@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Endo parses and generates [Rocket League](https://www.rocketleague.com)
 -- replays. Parsing replays can be used to analyze data in order to collect
 -- high-level statistics like players and points, or low-level details like
@@ -49,12 +51,15 @@ module Endo
   , Replay(..)
   , Section(..)
   , Header(..)
+  , Property(..)
   , Content(..)
   , Base64(..)
   )
 where
 
 import qualified Control.Monad as Monad
+import qualified Control.Monad.Trans.Class as Trans
+import qualified Control.Monad.Trans.State.Strict as State
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encoding as Aeson
 import qualified Data.Aeson.Types as Aeson
@@ -67,6 +72,7 @@ import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Char8 as Latin1
 import qualified Data.ByteString.Lazy as LazyBytes
 import qualified Data.Char as Char
+import qualified Data.HashMap.Strict as HashMap
 import qualified Data.Int as Int
 import qualified Data.List as List
 import qualified Data.Maybe as Maybe
@@ -80,6 +86,7 @@ import qualified System.Console.GetOpt as Console
 import qualified System.Environment as Environment
 import qualified System.Exit as Exit
 import qualified System.IO as IO
+import qualified Unsafe.Coerce as Unsafe
 
 
 -- | == Options
@@ -238,8 +245,7 @@ replayToJson_ replay =
 
 
 -- | A high-level section of a replay. Rocket League replays are split up into
--- two sections, each with a size and CRC. The instances for this type handle
--- the size and CRC so that you don't have to worry about them.
+-- two sections, each with a size and CRC.
 newtype Section a
   = Section a
 
@@ -300,7 +306,38 @@ data Header = Header
   -- ^ The label, which is always @\"TAGame.Replay_Soccar_TA\"@. This is most
   -- likely a [magic number](https://en.wikipedia.org/wiki/Magic_number_\(programming\))
   -- for the replay file format.
-  , headerRest :: Base64
+  , headerProperties :: HashMap.HashMap Text.Text Property
+  -- ^ These properties determine how a replay will look in the list of replays
+  -- in-game. One element is required for the replay to show up:
+  --
+  -- [@\"MapName\"@] This is a 'PropertyName' with a case-insensitive map
+  -- identifier, like @\"Stadium_P\"@.
+  --
+  -- There are many other properties that affect how the replay looks in the
+  -- list of replays.
+  --
+  -- [@\"Date\"@] A 'PropertyStr' with the format @"YYYY-mm-dd:HH-MM"@. Dates
+  -- are not validated, but the month must be between 1 and 12 to show up. The
+  -- hour is shown modulo 12 with AM or PM.
+  -- [@\"MatchType\"@] A 'PropertyName'. If this is not one of the expected
+  -- values, nothing will be shown next to the replay's map. The expected
+  -- values are: @\"Online\"@, @\"Offline\"@, @\"Private\"@, and @\"Season\"@.
+  -- [@\"NumFrames\"@] This 'PropertyInt' is used to calculate the length of
+  -- the match. There are 30 frames per second, a typical 5-minute match has
+  -- about 9,000 frames.
+  -- [@\"PrimaryPlayerTeam\"@] This is an 'PropertyInt'. It is either 0 (blue)
+  -- or 1 (orange). Any other value is ignored. If this would be 0, you don't
+  -- have to set it at all.
+  -- [@\"ReplayName\"@] An optional 'PropertyStr' with a user-supplied name for
+  -- the replay.
+  -- [@\"Team0Score\"@] The blue team's score as an 'PropertyInt'. Can be
+  -- omitted if the score is 0.
+  -- [@\"Team1Score\"@] The orange team's score as an 'PropertyInt'. Can also
+  -- be omitted if the score is 0.
+  -- [@\"TeamSize\"@] An 'PropertyInt' with the number of players per team.
+  -- This value is not validated, so you can put absurd values like 99.
+  -- [@\"bUnfairBots\"@] A 'PropertyBool' that makes "unfair" team sizes like
+  -- 1v2.
   }
 
 decodeHeader :: Binary.Get Header
@@ -310,7 +347,7 @@ decodeHeader = do
   Header majorVersion minorVersion
     <$> bytesToMaybe bytesToWord32 (hasPatchVersion majorVersion minorVersion)
     <*> bytesToText
-    <*> decodeBase64
+    <*> bytesToHashMap bytesToProperty
 
 encodeHeader :: Header -> Binary.Put
 encodeHeader header =
@@ -318,7 +355,7 @@ encodeHeader header =
     <> word32ToBytes (headerMinorVersion header)
     <> maybeToBytes word32ToBytes (headerPatchVersion header)
     <> textToBytes (headerLabel header)
-    <> encodeBase64 (headerRest header)
+    <> hashMapToBytes propertyToBytes (headerProperties header)
 
 jsonToHeader :: Aeson.Value -> Aeson.Parser Header
 jsonToHeader = Aeson.withObject "Header" $ \object ->
@@ -327,7 +364,7 @@ jsonToHeader = Aeson.withObject "Header" $ \object ->
     <*> requiredKey jsonToWord32 object "minorVersion"
     <*> optionalKey jsonToWord32 object "patchVersion"
     <*> requiredKey jsonToText object "label"
-    <*> requiredKey jsonToBase64 object "rest"
+    <*> requiredKey (jsonToHashMap jsonToProperty) object "properties"
 
 headerToJson :: Header -> Aeson.Encoding
 headerToJson header =
@@ -339,11 +376,83 @@ headerToJson header =
          "patchVersion"
          (headerPatchVersion header)
     <> toPair textToJson "label" (headerLabel header)
-    <> toPair base64ToJson "rest" (headerRest header)
+    <> toPair
+         (hashMapToJson propertyToJson)
+         "properties"
+         (headerProperties header)
 
 hasPatchVersion :: Word.Word32 -> Word.Word32 -> Bool
 hasPatchVersion majorVersion minorVersion =
   majorVersion >= 868 && minorVersion >= 18
+
+
+-- | Properties are given in the header and usually describe high-level game
+-- information like the player names and the information on their scoreboards.
+data Property
+  = PropertyFloat Float
+  | PropertyInt Int.Int32
+  | PropertyName Text.Text
+  -- ^ Names are like strings except that they show up in the list of names in
+  -- the content. It's not clear what this means exactly.
+  | PropertyStr Text.Text
+
+bytesToProperty :: Binary.Get Property
+bytesToProperty = do
+  kind <- bytesToText
+  case kind of
+    "FloatProperty" -> do
+      4 <- bytesToWord64
+      PropertyFloat <$> bytesToFloat
+    "IntProperty" -> do
+      4 <- bytesToWord64
+      PropertyInt <$> bytesToInt32
+    "NameProperty" -> do
+      size <- bytesToWord64
+      PropertyName <$> Binary.isolate (word64ToInt size) bytesToText
+    "StrProperty" -> do
+      size <- bytesToWord64
+      PropertyStr <$> Binary.isolate (word64ToInt size) bytesToText
+    _ -> fail $ "unknown property kind: " <> show kind
+
+propertyToBytes :: Property -> Binary.Put
+propertyToBytes property = case property of
+  PropertyFloat float ->
+    textToBytes "FloatProperty" <> word64ToBytes 4 <> floatToBytes float
+  PropertyInt int32 ->
+    textToBytes "IntProperty" <> word64ToBytes 4 <> int32ToBytes int32
+  PropertyName text ->
+    let bytes = LazyBytes.toStrict . Binary.runPut $ textToBytes text
+    in
+      textToBytes "NameProperty"
+      <> word64ToBytes (intToWord64 $ Bytes.length bytes)
+      <> Binary.putByteString bytes
+  PropertyStr text ->
+    let bytes = LazyBytes.toStrict . Binary.runPut $ textToBytes text
+    in
+      textToBytes "StrProperty"
+      <> word64ToBytes (intToWord64 $ Bytes.length bytes)
+      <> Binary.putByteString bytes
+
+jsonToProperty :: Aeson.Value -> Aeson.Parser Property
+jsonToProperty = Aeson.withObject "Property" $ \object -> do
+  kind <- requiredKey jsonToText object "kind"
+  case kind of
+    "float" -> PropertyFloat <$> requiredKey jsonToFloat object "value"
+    "int" -> PropertyInt <$> requiredKey jsonToInt32 object "value"
+    "name" -> PropertyName <$> requiredKey jsonToText object "value"
+    "str" -> PropertyStr <$> requiredKey jsonToText object "value"
+    _ -> fail $ "unknown property kind: " <> show kind
+
+propertyToJson :: Property -> Aeson.Encoding
+propertyToJson property = Aeson.pairs $ case property of
+  PropertyFloat float ->
+    toPair textToJson "kind" "float" <> toPair floatToJson "value" float
+  PropertyInt int32 ->
+    toPair textToJson "kind" "int" <> toPair int32ToJson "value" int32
+  PropertyName text ->
+    toPair textToJson "kind" "name" <> toPair textToJson "value" text
+  PropertyStr text ->
+    toPair textToJson "kind" "str" <> toPair textToJson "value" text
 
 
 -- | The content or "data" replay information. This includes everything that is
@@ -370,11 +479,66 @@ contentToJson :: Content -> Aeson.Encoding
 contentToJson = base64ToJson . contentToBase64
 
 
+bytesToFloat :: Binary.Get Float
+bytesToFloat = word32ToFloat <$> bytesToWord32
+
+floatToBytes :: Float -> Binary.Put
+floatToBytes = word32ToBytes . floatToWord32
+
+jsonToFloat :: Aeson.Value -> Aeson.Parser Float
+jsonToFloat = Aeson.parseJSON
+
+floatToJson :: Float -> Aeson.Encoding
+floatToJson = Aeson.toEncoding
+
+
+bytesToHashMap :: Binary.Get v -> Binary.Get (HashMap.HashMap Text.Text v)
+bytesToHashMap decode =
+  State.execStateT (bytesToHashMapHelper decode) HashMap.empty
+
+bytesToHashMapHelper
+  :: Binary.Get v -> State.StateT (HashMap.HashMap Text.Text v) Binary.Get ()
+bytesToHashMapHelper decode = do
+  key <- Trans.lift bytesToText
+  if key == "None"
+    then pure ()
+    else do
+      value <- Trans.lift decode
+      State.modify' $ HashMap.insert key value
+      bytesToHashMapHelper decode
+
+hashMapToBytes
+  :: (v -> Binary.Put) -> HashMap.HashMap Text.Text v -> Binary.Put
+hashMapToBytes encode = HashMap.foldrWithKey
+  (\key value put -> textToBytes key <> encode value <> put)
+  (textToBytes "None")
+
+jsonToHashMap
+  :: (Aeson.Value -> Aeson.Parser v)
+  -> Aeson.Value
+  -> Aeson.Parser (HashMap.HashMap Text.Text v)
+jsonToHashMap = Aeson.withObject "HashMap" . mapM
+
+hashMapToJson
+  :: (v -> Aeson.Encoding) -> HashMap.HashMap Text.Text v -> Aeson.Encoding
+hashMapToJson encode =
+  Aeson.pairs
+    . HashMap.foldrWithKey
+        (\key value series -> toPair encode key value <> series)
+        mempty
+
+
 bytesToInt32 :: Binary.Get Int.Int32
 bytesToInt32 = Binary.getInt32le
 
 int32ToBytes :: Int.Int32 -> Binary.Put
 int32ToBytes = Binary.putInt32le
+
+jsonToInt32 :: Aeson.Value -> Aeson.Parser Int.Int32
+jsonToInt32 = Aeson.parseJSON
+
+int32ToJson :: Int.Int32 -> Aeson.Encoding
+int32ToJson = Aeson.toEncoding
 
 
 bytesToMaybe :: Binary.Get a -> Bool -> Binary.Get (Maybe a)
@@ -407,21 +571,31 @@ word32ToJson :: Word.Word32 -> Aeson.Encoding
 word32ToJson = Aeson.toEncoding
 
 
+bytesToWord64 :: Binary.Get Word.Word64
+bytesToWord64 = Binary.getWord64le
+
+word64ToBytes :: Word.Word64 -> Binary.Put
+word64ToBytes = Binary.putWord64le
+
+
 bytesToText :: Binary.Get Text.Text
 bytesToText = do
   size <- bytesToInt32
-  if size < 0
+  Text.filter (/= '\x00') <$> if size < 0
     then fail "TODO: get utf 16"
     else Text.decodeLatin1 <$> Binary.getByteString (int32ToInt size)
 
 textToBytes :: Text.Text -> Binary.Put
-textToBytes text = if Text.all Char.isLatin1 text
-  then
-    let bytes = encodeLatin1 text
+textToBytes text
+  = let textWithNull = Text.snoc text '\x00'
     in
-      int32ToBytes (intToInt32 $ Bytes.length bytes)
-        <> Binary.putByteString bytes
-  else fail "TODO: put utf 16"
+      if Text.all Char.isLatin1 textWithNull
+        then
+          let bytes = encodeLatin1 textWithNull
+          in
+            int32ToBytes (intToInt32 $ Bytes.length bytes)
+              <> Binary.putByteString bytes
+        else fail "TODO: put utf 16"
 
 jsonToText :: Aeson.Value -> Aeson.Parser Text.Text
 jsonToText = Aeson.parseJSON
@@ -934,6 +1108,9 @@ die message = do
 encodeLatin1 :: Text.Text -> Bytes.ByteString
 encodeLatin1 = Latin1.pack . Text.unpack
 
+floatToWord32 :: Float -> Word.Word32
+floatToWord32 = Unsafe.unsafeCoerce
+
 hasExtension :: String -> FilePath -> Bool
 hasExtension = List.isSuffixOf
 
@@ -946,35 +1123,41 @@ intToInt32 = fromIntegral
 intToWord32 :: Int -> Word.Word32
 intToWord32 = fromIntegral
 
+intToWord64 :: Int -> Word.Word64
+intToWord64 = fromIntegral
+
 optionalKey
   :: (Aeson.Value -> Aeson.Parser v)
   -> Aeson.Object
-  -> String
+  -> Text.Text
   -> Aeson.Parser (Maybe v)
 optionalKey decode object key = do
-  value <- object Aeson..:? Text.pack key
+  value <- object Aeson..:? key
   maybe (pure Nothing) (jsonToMaybe decode) value
 
 requiredKey
   :: (Aeson.Value -> Aeson.Parser v)
   -> Aeson.Object
-  -> String
+  -> Text.Text
   -> Aeson.Parser v
 requiredKey decode object key = do
-  json <- object Aeson..: Text.pack key
+  json <- object Aeson..: key
   decode json
 
 third :: (a, b, c) -> c
 third (_, _, c) = c
 
-toPair :: (v -> Aeson.Encoding) -> String -> v -> Aeson.Series
-toPair encode key = Aeson.pairStr key . encode
+toPair :: (v -> Aeson.Encoding) -> Text.Text -> v -> Aeson.Series
+toPair encode key = Aeson.pair key . encode
 
 warnLn :: String -> IO ()
 warnLn = IO.hPutStrLn IO.stderr
 
 warn :: String -> IO ()
 warn = IO.hPutStr IO.stderr
+
+word32ToFloat :: Word.Word32 -> Float
+word32ToFloat = Unsafe.unsafeCoerce
 
 word8ToInt :: Word.Word8 -> Int
 word8ToInt = fromIntegral
@@ -984,3 +1167,6 @@ word32ToInt = fromIntegral
 
 word32ToWord8 :: Word.Word32 -> Word.Word8
 word32ToWord8 = fromIntegral
+
+word64ToInt :: Word.Word64 -> Int
+word64ToInt = fromIntegral
