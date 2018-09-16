@@ -50,7 +50,6 @@ module Endo
   , Section(..)
   , Header(..)
   , Content(..)
-  , I32(..)
   , Optional(..)
   , Base64(..)
   )
@@ -377,21 +376,11 @@ contentToJson :: Content -> Aeson.Encoding
 contentToJson = base64ToJson . contentToBase64
 
 
--- | A 32-bit signed integer stored in little-endian byte order.
-newtype I32
-  = I32 Int.Int32
+bytesToInt32 :: Binary.Get Int.Int32
+bytesToInt32 = Binary.getInt32le
 
-int32ToI32 :: Int.Int32 -> I32
-int32ToI32 = I32
-
-i32ToInt32 :: I32 -> Int.Int32
-i32ToInt32 (I32 int32) = int32
-
-decodeI32 :: Binary.Get I32
-decodeI32 = int32ToI32 <$> Binary.getInt32le
-
-encodeI32 :: I32 -> Binary.Put
-encodeI32 = Binary.putInt32le . i32ToInt32
+int32ToBytes :: Int.Int32 -> Binary.Put
+int32ToBytes = Binary.putInt32le
 
 
 -- | A value that may or may not exist. This type mostly exists to /avoid/ the
@@ -443,7 +432,7 @@ word32ToJson = Aeson.toEncoding
 
 bytesToText :: Binary.Get Text.Text
 bytesToText = do
-  size <- i32ToInt32 <$> decodeI32
+  size <- bytesToInt32
   if size < 0
     then fail "TODO: get utf 16"
     else Text.decodeLatin1 <$> Binary.getByteString (int32ToInt size)
@@ -453,7 +442,7 @@ textToBytes text = if Text.all Char.isLatin1 text
   then
     let bytes = encodeLatin1 text
     in
-      encodeI32 (int32ToI32 . intToInt32 $ Bytes.length bytes)
+      int32ToBytes (intToInt32 $ Bytes.length bytes)
         <> Binary.putByteString bytes
   else fail "TODO: put utf 16"
 
