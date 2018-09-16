@@ -190,10 +190,7 @@ mainWith name arguments = do
 -- give you back what you started with (unlike 'replayFromJson'). The result
 -- should be effectively the same, but the actual bytes might differ slightly.
 replayFromBinary :: Bytes.ByteString -> Either String Replay
-replayFromBinary =
-  either (Left . third) (Right . third)
-    . Binary.runGetOrFail decodeReplay
-    . LazyBytes.fromStrict
+replayFromBinary = runGet decodeReplay
 
 -- | Encodes a JSON replay. This is the opposite of 'replayFromJson'.
 replayToJson :: Replay -> Bytes.ByteString
@@ -210,7 +207,7 @@ replayFromJson bytes = do
 
 -- | Encodes a binary replay. This is the opposite of 'replayFromBinary'.
 replayToBinary :: Replay -> Bytes.ByteString
-replayToBinary = LazyBytes.toStrict . Binary.runPut . encodeReplay
+replayToBinary = runPut encodeReplay
 
 
 -- | A Rocket League replay. Most of the information you'll usually want, like
@@ -267,15 +264,11 @@ decodeSection decode = do
     <> show actualCrc
     <> " does not match expected CRC "
     <> show expectedCrc
-  toSection <$> either
-    (fail . third)
-    (pure . third)
-    (Binary.runGetOrFail decode $ LazyBytes.fromStrict bytes)
+  toSection <$> either fail pure (runGet decode bytes)
 
 encodeSection :: (a -> Binary.Put) -> Section a -> Binary.Put
 encodeSection encode section =
-  let
-    bytes = LazyBytes.toStrict . Binary.runPut . encode $ fromSection section
+  let bytes = runPut encode $ fromSection section
   in
     word32ToBytes (intToWord32 $ Bytes.length bytes)
     <> word32ToBytes (crc32Bytes crc32Table crc32Initial bytes)
@@ -421,13 +414,13 @@ propertyToBytes property = case property of
   PropertyInt int32 ->
     textToBytes "IntProperty" <> word64ToBytes 4 <> int32ToBytes int32
   PropertyName text ->
-    let bytes = LazyBytes.toStrict . Binary.runPut $ textToBytes text
+    let bytes = runPut textToBytes text
     in
       textToBytes "NameProperty"
       <> word64ToBytes (intToWord64 $ Bytes.length bytes)
       <> Binary.putByteString bytes
   PropertyStr text ->
-    let bytes = LazyBytes.toStrict . Binary.runPut $ textToBytes text
+    let bytes = runPut textToBytes text
     in
       textToBytes "StrProperty"
       <> word64ToBytes (intToWord64 $ Bytes.length bytes)
@@ -1143,6 +1136,15 @@ requiredKey
 requiredKey decode object key = do
   json <- object Aeson..: key
   decode json
+
+runGet :: Binary.Get a -> Bytes.ByteString -> Either String a
+runGet decode =
+  either (Left . third) (Right . third)
+    . Binary.runGetOrFail decode
+    . LazyBytes.fromStrict
+
+runPut :: (a -> Binary.Put) -> a -> Bytes.ByteString
+runPut encode = LazyBytes.toStrict . Binary.runPut . encode
 
 third :: (a, b, c) -> c
 third (_, _, c) = c
