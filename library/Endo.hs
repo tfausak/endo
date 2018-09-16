@@ -470,10 +470,10 @@ contentToBase64 :: Content -> Base64
 contentToBase64 (Content base64) = base64
 
 decodeContent :: Binary.Get Content
-decodeContent = base64ToContent <$> decodeBase64
+decodeContent = base64ToContent <$> bytesToBase64
 
 encodeContent :: Content -> Binary.Put
-encodeContent = encodeBase64 . contentToBase64
+encodeContent = base64ToBytes . contentToBase64
 
 jsonToContent :: Aeson.Value -> Aeson.Parser Content
 jsonToContent = fmap base64ToContent . jsonToBase64
@@ -613,29 +613,28 @@ textToJson = Aeson.toEncoding
 newtype Base64
   = Base64 Bytes.ByteString
 
-byteStringToBase64 :: Bytes.ByteString -> Base64
-byteStringToBase64 = Base64
+toBase64 :: Bytes.ByteString -> Base64
+toBase64 = Base64
 
-base64ToByteString :: Base64 -> Bytes.ByteString
-base64ToByteString (Base64 bytes) = bytes
+fromBase64 :: Base64 -> Bytes.ByteString
+fromBase64 (Base64 bytes) = bytes
 
-decodeBase64 :: Binary.Get Base64
-decodeBase64 =
-  byteStringToBase64 . LazyBytes.toStrict <$> Binary.getRemainingLazyByteString
+bytesToBase64 :: Binary.Get Base64
+bytesToBase64 =
+  toBase64 . LazyBytes.toStrict <$> Binary.getRemainingLazyByteString
 
-encodeBase64 :: Base64 -> Binary.Put
-encodeBase64 = Binary.putByteString . base64ToByteString
+base64ToBytes :: Base64 -> Binary.Put
+base64ToBytes = Binary.putByteString . fromBase64
 
 jsonToBase64 :: Aeson.Value -> Aeson.Parser Base64
 jsonToBase64 =
   Aeson.withText "Base64"
-    $ either fail (pure . byteStringToBase64)
+    $ either fail (pure . toBase64)
     . Base64.decode
     . Text.encodeUtf8
 
 base64ToJson :: Base64 -> Aeson.Encoding
-base64ToJson =
-  Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . base64ToByteString
+base64ToJson = Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . fromBase64
 
 
 getInput :: Maybe FilePath -> IO Bytes.ByteString
