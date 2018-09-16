@@ -53,7 +53,6 @@ module Endo
   , I32(..)
   , Optional(..)
   , U32(..)
-  , Unicode(..)
   , Base64(..)
   )
 where
@@ -303,7 +302,7 @@ data Header = Header
   , headerPatchVersion :: Optional U32
   -- ^ The patch or "net" version number. Replays before v1.35 (the
   -- "anniversary update") don't have this field.
-  , headerLabel :: Unicode
+  , headerLabel :: Text.Text
   -- ^ The label, which is always @\"TAGame.Replay_Soccar_TA\"@. This is most
   -- likely a [magic number](https://en.wikipedia.org/wiki/Magic_number_\(programming\))
   -- for the replay file format.
@@ -316,7 +315,7 @@ decodeHeader = do
   minorVersion <- decodeU32
   Header majorVersion minorVersion
     <$> decodeOptional decodeU32 (hasPatchVersion majorVersion minorVersion)
-    <*> decodeUnicode
+    <*> bytesToText
     <*> decodeBase64
 
 encodeHeader :: Header -> Binary.Put
@@ -324,7 +323,7 @@ encodeHeader header =
   encodeU32 (headerMajorVersion header)
     <> encodeU32 (headerMinorVersion header)
     <> encodeOptional encodeU32 (headerPatchVersion header)
-    <> encodeUnicode (headerLabel header)
+    <> textToBytes (headerLabel header)
     <> encodeBase64 (headerRest header)
 
 jsonToHeader :: Aeson.Value -> Aeson.Parser Header
@@ -333,7 +332,7 @@ jsonToHeader = Aeson.withObject "Header" $ \object ->
     <$> requiredKeyWith jsonToU32 object "majorVersion"
     <*> requiredKeyWith jsonToU32 object "minorVersion"
     <*> optionalKeyWith jsonToU32 object "patchVersion"
-    <*> requiredKeyWith jsonToUnicode object "label"
+    <*> requiredKeyWith jsonToText object "label"
     <*> requiredKeyWith jsonToBase64 object "rest"
 
 headerToJson :: Header -> Aeson.Encoding
@@ -345,7 +344,7 @@ headerToJson header =
          (optionalToJson u32ToJson)
          "patchVersion"
          (headerPatchVersion header)
-    <> toPairWith unicodeToJson "label" (headerLabel header)
+    <> toPairWith textToJson "label" (headerLabel header)
     <> toPairWith base64ToJson "rest" (headerRest header)
 
 hasPatchVersion :: U32 -> U32 -> Bool
@@ -451,44 +450,27 @@ u32ToJson :: U32 -> Aeson.Encoding
 u32ToJson = Aeson.toEncoding . u32ToWord32
 
 
--- | Either Latin-1 (ISO 8859-1) or UTF-16 encoded text. By default Rocket
--- League encodes text as Latin-1 using 8 bits per character. If any characters
--- cannot be represented in Latin-1, Rocket League encodes the entire text as
--- UTF-16 with little-endian byte order, using 16 bits per character.
-newtype Unicode
-  = Unicode Text.Text
-
-textToUnicode :: Text.Text -> Unicode
-textToUnicode = Unicode
-
-unicodeToText :: Unicode -> Text.Text
-unicodeToText (Unicode text) = text
-
-decodeUnicode :: Binary.Get Unicode
-decodeUnicode = do
+bytesToText :: Binary.Get Text.Text
+bytesToText = do
   size <- i32ToInt32 <$> decodeI32
   if size < 0
     then fail "TODO: get utf 16"
-    else textToUnicode . Text.decodeLatin1 <$> Binary.getByteString
-      (int32ToInt size)
+    else Text.decodeLatin1 <$> Binary.getByteString (int32ToInt size)
 
-encodeUnicode :: Unicode -> Binary.Put
-encodeUnicode unicode =
-  let text = unicodeToText unicode
-  in
-    if Text.all Char.isLatin1 text
-      then
-        let bytes = encodeLatin1 text
-        in
-          encodeI32 (int32ToI32 . intToInt32 $ Bytes.length bytes)
-            <> Binary.putByteString bytes
-      else fail "TODO: put utf 16"
+textToBytes :: Text.Text -> Binary.Put
+textToBytes text = if Text.all Char.isLatin1 text
+  then
+    let bytes = encodeLatin1 text
+    in
+      encodeI32 (int32ToI32 . intToInt32 $ Bytes.length bytes)
+        <> Binary.putByteString bytes
+  else fail "TODO: put utf 16"
 
-jsonToUnicode :: Aeson.Value -> Aeson.Parser Unicode
-jsonToUnicode = fmap textToUnicode . Aeson.parseJSON
+jsonToText :: Aeson.Value -> Aeson.Parser Text.Text
+jsonToText = Aeson.parseJSON
 
-unicodeToJson :: Unicode -> Aeson.Encoding
-unicodeToJson = Aeson.toEncoding . unicodeToText
+textToJson :: Text.Text -> Aeson.Encoding
+textToJson = Aeson.toEncoding
 
 
 newtype Base64
