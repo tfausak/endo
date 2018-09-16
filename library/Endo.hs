@@ -189,22 +189,25 @@ mainWith name arguments = do
 replayFromBinary :: Bytes.ByteString -> Either String Replay
 replayFromBinary =
   either (Left . third) (Right . third)
-    . Binary.decodeOrFail
+    . Binary.runGetOrFail decodeReplay
     . LazyBytes.fromStrict
 
 -- | Encodes a JSON replay. This is the opposite of 'replayFromJson'.
 replayToJson :: Replay -> Bytes.ByteString
-replayToJson = LazyBytes.toStrict . Aeson.encode
+replayToJson =
+  LazyBytes.toStrict . Aeson.encodingToLazyByteString . replayToJson_
 
 -- | Decodes a JSON replay. This is the opposite of 'replayToJson'. Note that
 -- converting from JSON and then back to JSON /is/ guaranteed to give you back
 -- what you started with (unlike 'replayFromBinary').
 replayFromJson :: Bytes.ByteString -> Either String Replay
-replayFromJson = Aeson.eitherDecodeStrict'
+replayFromJson bytes = do
+  json <- Aeson.eitherDecodeStrict bytes
+  Aeson.parseEither jsonToReplay json
 
 -- | Encodes a binary replay. This is the opposite of 'replayFromBinary'.
 replayToBinary :: Replay -> Bytes.ByteString
-replayToBinary = LazyBytes.toStrict . Binary.encode
+replayToBinary = LazyBytes.toStrict . Binary.runPut . encodeReplay
 
 
 -- | A Rocket League replay. Most of the information you'll usually want, like
@@ -216,21 +219,29 @@ data Replay = Replay
   , replayContent :: Section Content
   }
 
-instance Binary.Binary Replay where
-  get = Binary.label "Replay" $ Replay <$> decodeSection decodeHeader <*> decodeSection decodeContent
-  put replay =
-    encodeSection encodeHeader (replayHeader replay) <> encodeSection encodeContent (replayContent replay)
+decodeReplay :: Binary.Get Replay
+decodeReplay =
+  Replay <$> decodeSection decodeHeader <*> decodeSection decodeContent
 
-instance Aeson.FromJSON Replay where
-  parseJSON = Aeson.withObject "Replay" $ \object ->
-    Replay <$> requiredKeyWith (jsonToSection jsonToHeader) object "header" <*> requiredKeyWith (jsonToSection jsonToContent) object "content"
+encodeReplay :: Replay -> Binary.Put
+encodeReplay replay =
+  encodeSection encodeHeader (replayHeader replay)
+    <> encodeSection encodeContent (replayContent replay)
 
-instance Aeson.ToJSON Replay where
-  toEncoding replay =
-    Aeson.pairs $ toPairWith (sectionToJson headerToJson) "header" (replayHeader replay) <> toPairWith (sectionToJson contentToJson)
-      "content"
-      (replayContent replay)
-  toJSON = error "Replay toJSON"
+jsonToReplay :: Aeson.Value -> Aeson.Parser Replay
+jsonToReplay = Aeson.withObject "Replay" $ \object ->
+  Replay
+    <$> requiredKeyWith (jsonToSection jsonToHeader) object "header"
+    <*> requiredKeyWith (jsonToSection jsonToContent) object "content"
+
+replayToJson_ :: Replay -> Aeson.Encoding
+replayToJson_ replay =
+  Aeson.pairs
+    $ toPairWith (sectionToJson headerToJson) "header" (replayHeader replay)
+    <> toPairWith
+         (sectionToJson contentToJson)
+         "content"
+         (replayContent replay)
 
 
 -- | A high-level section of a replay. Rocket League replays are split up into
