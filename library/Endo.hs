@@ -217,23 +217,20 @@ data Replay = Replay
   }
 
 instance Binary.Binary Replay where
-  get = Binary.label "Replay" $ Replay <$> Binary.get <*> Binary.get
+  get = Binary.label "Replay" $ Replay <$> decodeSection Binary.get <*> decodeSection Binary.get
   put replay =
-    Binary.put (replayHeader replay) <> Binary.put (replayContent replay)
+    encodeSection Binary.put (replayHeader replay) <> encodeSection Binary.put (replayContent replay)
 
 instance Aeson.FromJSON Replay where
   parseJSON = Aeson.withObject "Replay" $ \object ->
-    Replay <$> requiredKey object "header" <*> requiredKey object "content"
+    Replay <$> requiredKeyWith (jsonToSection Aeson.parseJSON) object "header" <*> requiredKeyWith (jsonToSection Aeson.parseJSON) object "content"
 
 instance Aeson.ToJSON Replay where
   toEncoding replay =
-    Aeson.pairs $ toPair "header" (replayHeader replay) <> toPair
+    Aeson.pairs $ toPairWith (sectionToJson Aeson.toEncoding) "header" (replayHeader replay) <> toPairWith (sectionToJson Aeson.toEncoding)
       "content"
       (replayContent replay)
-  toJSON replay = Aeson.object
-    [ toPair "header" $ replayHeader replay
-    , toPair "content" $ replayContent replay
-    ]
+  toJSON = error "Replay toJSON"
 
 
 -- | A high-level section of a replay. Rocket League replays are split up into
@@ -242,39 +239,44 @@ instance Aeson.ToJSON Replay where
 newtype Section a
   = Section a
 
-instance Binary.Binary a => Binary.Binary (Section a) where
-  get = Binary.label "Section" $ do
-    size <- decodeU32
-    expectedCrc <- u32ToWord32 <$> decodeU32
-    bytes <- Binary.getByteString . word32ToInt $ u32ToWord32 size
-    let actualCrc = crc32Bytes crc32Table crc32Initial bytes
-    Monad.when (actualCrc /= expectedCrc) . fail
-      $ "actual CRC "
-      <> show actualCrc
-      <> " does not match expected CRC "
-      <> show expectedCrc
-    Section <$> either
-      (fail . third)
-      (pure . third)
-      (Binary.decodeOrFail $ LazyBytes.fromStrict bytes)
-  put section =
-    let
-      bytes =
-        LazyBytes.toStrict . Binary.runPut . Binary.put $ unwrapSection section
-    in
-      encodeU32 (word32ToU32 . intToWord32 $ Bytes.length bytes)
-      <> encodeU32 (word32ToU32 $ crc32Bytes crc32Table crc32Initial bytes)
-      <> Binary.putByteString bytes
+toSection :: a -> Section a
+toSection = Section
 
-instance Aeson.FromJSON a => Aeson.FromJSON (Section a) where
-  parseJSON = fmap Section . Aeson.parseJSON
+fromSection :: Section a -> a
+fromSection (Section a) = a
 
-instance Aeson.ToJSON a => Aeson.ToJSON (Section a) where
-  toEncoding = Aeson.toEncoding . unwrapSection
-  toJSON = Aeson.toJSON . unwrapSection
+decodeSection :: Binary.Get a -> Binary.Get (Section a)
+decodeSection decode = do
+  size <- decodeU32
+  expectedCrc <- u32ToWord32 <$> decodeU32
+  bytes <- Binary.getByteString . word32ToInt $ u32ToWord32 size
+  let actualCrc = crc32Bytes crc32Table crc32Initial bytes
+  Monad.when (actualCrc /= expectedCrc)
+    . fail
+    $ "actual CRC "
+    <> show actualCrc
+    <> " does not match expected CRC "
+    <> show expectedCrc
+  toSection <$> either
+    (fail . third)
+    (pure . third)
+    (Binary.runGetOrFail decode $ LazyBytes.fromStrict bytes)
 
-unwrapSection :: Section a -> a
-unwrapSection (Section a) = a
+encodeSection :: (a -> Binary.Put) -> Section a -> Binary.Put
+encodeSection encode section =
+  let
+    bytes = LazyBytes.toStrict . Binary.runPut . encode $ fromSection section
+  in
+    encodeU32 (word32ToU32 . intToWord32 $ Bytes.length bytes)
+    <> encodeU32 (word32ToU32 $ crc32Bytes crc32Table crc32Initial bytes)
+    <> Binary.putByteString bytes
+
+jsonToSection
+  :: (Aeson.Value -> Aeson.Parser a) -> Aeson.Value -> Aeson.Parser (Section a)
+jsonToSection decode = fmap toSection . decode
+
+sectionToJson :: (a -> Aeson.Encoding) -> Section a -> Aeson.Encoding
+sectionToJson encode = encode . fromSection
 
 
 -- | The header or "meta" replay information. This includes everything that is
@@ -997,9 +999,6 @@ optionalKeyWith decode object key = do
     Nothing -> pure $ maybeToOptional Nothing
     Just json -> jsonToOptional decode json
 
-requiredKey :: Aeson.FromJSON v => Aeson.Object -> String -> Aeson.Parser v
-requiredKey object key = object Aeson..: Text.pack key
-
 requiredKeyWith
   :: (Aeson.Value -> Aeson.Parser v)
   -> Aeson.Object
@@ -1011,9 +1010,6 @@ requiredKeyWith decode object key = do
 
 third :: (a, b, c) -> c
 third (_, _, c) = c
-
-toPair :: (Aeson.ToJSON v, Aeson.KeyValue p) => String -> v -> p
-toPair key value = Text.pack key Aeson..= value
 
 toPairWith :: (v -> Aeson.Encoding) -> String -> v -> Aeson.Series
 toPairWith encode key = Aeson.pairStr key . encode
