@@ -50,7 +50,6 @@ module Endo
   , Section(..)
   , Header(..)
   , Content(..)
-  , Optional(..)
   , Base64(..)
   )
 where
@@ -297,7 +296,7 @@ data Header = Header
   -- guarantee that it's a one-to-one mapping.
   , headerMinorVersion :: Word.Word32
   -- ^ The minor or "licensee" version number.
-  , headerPatchVersion :: Optional Word.Word32
+  , headerPatchVersion :: Maybe Word.Word32
   -- ^ The patch or "net" version number. Replays before v1.35 (the
   -- "anniversary update") don't have this field.
   , headerLabel :: Text.Text
@@ -312,9 +311,7 @@ decodeHeader = do
   majorVersion <- bytesToWord32
   minorVersion <- bytesToWord32
   Header majorVersion minorVersion
-    <$> decodeOptional
-          bytesToWord32
-          (hasPatchVersion majorVersion minorVersion)
+    <$> bytesToMaybe bytesToWord32 (hasPatchVersion majorVersion minorVersion)
     <*> bytesToText
     <*> decodeBase64
 
@@ -322,7 +319,7 @@ encodeHeader :: Header -> Binary.Put
 encodeHeader header =
   word32ToBytes (headerMajorVersion header)
     <> word32ToBytes (headerMinorVersion header)
-    <> encodeOptional word32ToBytes (headerPatchVersion header)
+    <> maybeToBytes word32ToBytes (headerPatchVersion header)
     <> textToBytes (headerLabel header)
     <> encodeBase64 (headerRest header)
 
@@ -341,7 +338,7 @@ headerToJson header =
     $ toPairWith word32ToJson "majorVersion" (headerMajorVersion header)
     <> toPairWith word32ToJson "minorVersion" (headerMinorVersion header)
     <> toPairWith
-         (optionalToJson word32ToJson)
+         (maybeToJson word32ToJson)
          "patchVersion"
          (headerPatchVersion header)
     <> toPairWith textToJson "label" (headerLabel header)
@@ -383,38 +380,21 @@ int32ToBytes :: Int.Int32 -> Binary.Put
 int32ToBytes = Binary.putInt32le
 
 
--- | A value that may or may not exist. This type mostly exists to /avoid/ the
--- 'Binary.Binary' and 'Aeson.FromJSON' instances for 'Maybe'. The
--- 'Binary.Binary' instance is troublesome because in Rocket League replays
--- typically the lack of a value is not encoded at all. The 'Aeson.FromJSON'
--- instance is troublesome because missing a key is treated differently than a
--- key existing but the value being 'Aeson.Null'.
-newtype Optional a
-  = Optional (Maybe a)
+bytesToMaybe :: Binary.Get a -> Bool -> Binary.Get (Maybe a)
+bytesToMaybe decode condition =
+  if condition then Just <$> decode else pure Nothing
 
-optionalToMaybe :: Optional a -> Maybe a
-optionalToMaybe (Optional a) = a
+maybeToBytes :: (a -> Binary.Put) -> Maybe a -> Binary.Put
+maybeToBytes = maybe mempty
 
-maybeToOptional :: Maybe a -> Optional a
-maybeToOptional = Optional
+jsonToMaybe
+  :: (Aeson.Value -> Aeson.Parser a) -> Aeson.Value -> Aeson.Parser (Maybe a)
+jsonToMaybe decode json = case json of
+  Aeson.Null -> pure Nothing
+  _ -> Just <$> decode json
 
-decodeOptional :: Binary.Get a -> Bool -> Binary.Get (Optional a)
-decodeOptional decode condition =
-  maybeToOptional <$> if condition then Just <$> decode else pure Nothing
-
-encodeOptional :: (a -> Binary.Put) -> Optional a -> Binary.Put
-encodeOptional encode = maybe mempty encode . optionalToMaybe
-
-jsonToOptional
-  :: (Aeson.Value -> Aeson.Parser a)
-  -> Aeson.Value
-  -> Aeson.Parser (Optional a)
-jsonToOptional decode json = do
-  value <- Aeson.parseJSON json
-  maybeToOptional <$> maybe (pure Nothing) (fmap Just . decode) value
-
-optionalToJson :: (a -> Aeson.Encoding) -> Optional a -> Aeson.Encoding
-optionalToJson encode = maybe Aeson.null_ encode . optionalToMaybe
+maybeToJson :: (a -> Aeson.Encoding) -> Maybe a -> Aeson.Encoding
+maybeToJson = maybe Aeson.null_
 
 
 bytesToWord32 :: Binary.Get Word.Word32
@@ -973,12 +953,12 @@ optionalKeyWith
   :: (Aeson.Value -> Aeson.Parser v)
   -> Aeson.Object
   -> String
-  -> Aeson.Parser (Optional v)
+  -> Aeson.Parser (Maybe v)
 optionalKeyWith decode object key = do
   maybeJson <- object Aeson..:? Text.pack key
   case maybeJson of
-    Nothing -> pure $ maybeToOptional Nothing
-    Just json -> jsonToOptional decode json
+    Nothing -> pure Nothing
+    Just json -> jsonToMaybe decode json
 
 requiredKeyWith
   :: (Aeson.Value -> Aeson.Parser v)
