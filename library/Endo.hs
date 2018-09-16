@@ -303,13 +303,13 @@ instance Binary.Binary Header where
     majorVersion <- decodeU32
     minorVersion <- decodeU32
     Header majorVersion minorVersion
-      <$> getOptionalWith decodeU32 (hasPatchVersion majorVersion minorVersion)
+      <$> decodeOptional decodeU32 (hasPatchVersion majorVersion minorVersion)
       <*> decodeUnicode
       <*> decodeBase64
   put header =
     encodeU32 (headerMajorVersion header)
       <> encodeU32 (headerMinorVersion header)
-      <> putOptionalWith encodeU32 (headerPatchVersion header)
+      <> encodeOptional encodeU32 (headerPatchVersion header)
       <> encodeUnicode (headerLabel header)
       <> encodeBase64 (headerRest header)
 
@@ -327,7 +327,7 @@ instance Aeson.ToJSON Header where
     Aeson.pairs
       $ toPairWith u32ToJson "majorVersion" (headerMajorVersion header)
       <> toPairWith u32ToJson "minorVersion" (headerMinorVersion header)
-      <> toPairWith (maybe Aeson.null_ u32ToJson . optionalToMaybe) "patchVersion" (headerPatchVersion header)
+      <> toPairWith (optionalToJson u32ToJson) "patchVersion" (headerPatchVersion header)
       <> toPairWith unicodeToJson "label" (headerLabel header)
       <> toPairWith base64ToJson "rest" (headerRest header)
   toJSON = error "Header toJSON"
@@ -391,22 +391,29 @@ i32ToInt32 (I32 int32) = int32
 newtype Optional a
   = Optional (Maybe a)
 
-instance Aeson.ToJSON a => Aeson.ToJSON (Optional a) where
-  toEncoding = Aeson.toEncoding . optionalToMaybe
-  toJSON = Aeson.toJSON . optionalToMaybe
-
 optionalToMaybe :: Optional a -> Maybe a
 optionalToMaybe (Optional a) = a
 
 maybeToOptional :: Maybe a -> Optional a
 maybeToOptional = Optional
 
-getOptionalWith :: Binary.Get a -> Bool -> Binary.Get (Optional a)
-getOptionalWith decode condition =
+decodeOptional :: Binary.Get a -> Bool -> Binary.Get (Optional a)
+decodeOptional decode condition =
   maybeToOptional <$> if condition then Just <$> decode else pure Nothing
 
-putOptionalWith :: (a -> Binary.Put) -> Optional a -> Binary.Put
-putOptionalWith encode = maybe mempty encode . optionalToMaybe
+encodeOptional :: (a -> Binary.Put) -> Optional a -> Binary.Put
+encodeOptional encode = maybe mempty encode . optionalToMaybe
+
+optionalToJson :: (a -> Aeson.Encoding) -> Optional a -> Aeson.Encoding
+optionalToJson encode = maybe Aeson.null_ encode . optionalToMaybe
+
+jsonToOptional
+  :: (Aeson.Value -> Aeson.Parser a)
+  -> Aeson.Value
+  -> Aeson.Parser (Optional a)
+jsonToOptional decode json = do
+  value <- Aeson.parseJSON json
+  maybeToOptional <$> maybe (pure Nothing) (fmap Just . decode) value
 
 
 -- | A 32-bit unsigned integer stored in little-endian byte order.
@@ -997,9 +1004,7 @@ optionalKeyWith decode object key = do
   maybeJson <- object Aeson..:? Text.pack key
   case maybeJson of
     Nothing -> pure $ maybeToOptional Nothing
-    Just json -> do
-      value <- decode json
-      pure . maybeToOptional $ Just value
+    Just json -> jsonToOptional decode json
 
 requiredKey :: Aeson.FromJSON v => Aeson.Object -> String -> Aeson.Parser v
 requiredKey object key = object Aeson..: Text.pack key
