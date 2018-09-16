@@ -245,11 +245,11 @@ newtype Section a
 
 instance Binary.Binary a => Binary.Binary (Section a) where
   get = Binary.label "Section" $ do
-    size <- Binary.get
-    expectedCrc <- Binary.get
+    size <- decodeU32
+    expectedCrc <- u32ToWord32 <$> decodeU32
     bytes <- Binary.getByteString . word32ToInt $ u32ToWord32 size
-    let actualCrc = word32ToU32 $ crc32Bytes crc32Table crc32Initial bytes
-    Monad.when (u32ToWord32 actualCrc /= u32ToWord32 expectedCrc) . fail
+    let actualCrc = crc32Bytes crc32Table crc32Initial bytes
+    Monad.when (actualCrc /= expectedCrc) . fail
       $ "actual CRC "
       <> show actualCrc
       <> " does not match expected CRC "
@@ -263,8 +263,8 @@ instance Binary.Binary a => Binary.Binary (Section a) where
       bytes =
         LazyBytes.toStrict . Binary.runPut . Binary.put $ unwrapSection section
     in
-      Binary.put (word32ToU32 . intToWord32 $ Bytes.length bytes)
-      <> Binary.put (word32ToU32 $ crc32Bytes crc32Table crc32Initial bytes)
+      encodeU32 (word32ToU32 . intToWord32 $ Bytes.length bytes)
+      <> encodeU32 (word32ToU32 $ crc32Bytes crc32Table crc32Initial bytes)
       <> Binary.putByteString bytes
 
 instance Aeson.FromJSON a => Aeson.FromJSON (Section a) where
@@ -300,34 +300,34 @@ data Header = Header
 
 instance Binary.Binary Header where
   get = Binary.label "Header" $ do
-    majorVersion <- Binary.get
-    minorVersion <- Binary.get
+    majorVersion <- decodeU32
+    minorVersion <- decodeU32
     Header majorVersion minorVersion
-      <$> getOptional (hasPatchVersion majorVersion minorVersion)
+      <$> getOptionalWith decodeU32 (hasPatchVersion majorVersion minorVersion)
       <*> decodeUnicode
       <*> decodeBase64
   put header =
-    Binary.put (headerMajorVersion header)
-      <> Binary.put (headerMinorVersion header)
-      <> putOptional (headerPatchVersion header)
+    encodeU32 (headerMajorVersion header)
+      <> encodeU32 (headerMinorVersion header)
+      <> putOptionalWith encodeU32 (headerPatchVersion header)
       <> encodeUnicode (headerLabel header)
       <> encodeBase64 (headerRest header)
 
 instance Aeson.FromJSON Header where
   parseJSON = Aeson.withObject "Header" $ \object ->
     Header
-      <$> requiredKey object "majorVersion"
-      <*> requiredKey object "minorVersion"
-      <*> optionalKey object "patchVersion"
+      <$> requiredKeyWith jsonToU32 object "majorVersion"
+      <*> requiredKeyWith jsonToU32 object "minorVersion"
+      <*> optionalKeyWith jsonToU32 object "patchVersion"
       <*> requiredKeyWith jsonToUnicode object "label"
       <*> requiredKeyWith jsonToBase64 object "rest"
 
 instance Aeson.ToJSON Header where
   toEncoding header =
     Aeson.pairs
-      $ toPair "majorVersion" (headerMajorVersion header)
-      <> toPair "minorVersion" (headerMinorVersion header)
-      <> toPair "patchVersion" (headerPatchVersion header)
+      $ toPairWith u32ToJson "majorVersion" (headerMajorVersion header)
+      <> toPairWith u32ToJson "minorVersion" (headerMinorVersion header)
+      <> toPairWith (maybe Aeson.null_ u32ToJson . optionalToMaybe) "patchVersion" (headerPatchVersion header)
       <> toPairWith unicodeToJson "label" (headerLabel header)
       <> toPairWith base64ToJson "rest" (headerRest header)
   toJSON = error "Header toJSON"
@@ -401,37 +401,35 @@ optionalToMaybe (Optional a) = a
 maybeToOptional :: Maybe a -> Optional a
 maybeToOptional = Optional
 
-getOptional :: Binary.Binary a => Bool -> Binary.Get (Optional a)
-getOptional condition =
-  maybeToOptional <$> if condition then Just <$> Binary.get else pure Nothing
+getOptionalWith :: Binary.Get a -> Bool -> Binary.Get (Optional a)
+getOptionalWith decode condition =
+  maybeToOptional <$> if condition then Just <$> decode else pure Nothing
 
-putOptional :: Binary.Binary a => Optional a -> Binary.Put
-putOptional = maybe mempty Binary.put . optionalToMaybe
+putOptionalWith :: (a -> Binary.Put) -> Optional a -> Binary.Put
+putOptionalWith encode = maybe mempty encode . optionalToMaybe
 
 
 -- | A 32-bit unsigned integer stored in little-endian byte order.
 newtype U32
   = U32 Word.Word32
 
-instance Binary.Binary U32 where
-  get = word32ToU32 <$> Binary.getWord32le
-  put = Binary.putWord32le . u32ToWord32
-
-instance Aeson.FromJSON U32 where
-  parseJSON = fmap word32ToU32 . Aeson.parseJSON
-
-instance Show U32 where
-  show = Printf.printf "0x%08x" . u32ToWord32
-
-instance Aeson.ToJSON U32 where
-  toEncoding = Aeson.toEncoding . u32ToWord32
-  toJSON = Aeson.toJSON . u32ToWord32
-
 word32ToU32 :: Word.Word32 -> U32
 word32ToU32 = U32
 
 u32ToWord32 :: U32 -> Word.Word32
 u32ToWord32 (U32 word32) = word32
+
+decodeU32 :: Binary.Get U32
+decodeU32 = word32ToU32 <$> Binary.getWord32le
+
+encodeU32 :: U32 -> Binary.Put
+encodeU32 = Binary.putWord32le . u32ToWord32
+
+jsonToU32 :: Aeson.Value -> Aeson.Parser U32
+jsonToU32 = fmap word32ToU32 . Aeson.parseJSON
+
+u32ToJson :: U32 -> Aeson.Encoding
+u32ToJson = Aeson.toEncoding . u32ToWord32
 
 
 -- | Either Latin-1 (ISO 8859-1) or UTF-16 encoded text. By default Rocket
@@ -990,9 +988,18 @@ intToInt32 = fromIntegral
 intToWord32 :: Int -> Word.Word32
 intToWord32 = fromIntegral
 
-optionalKey
-  :: Aeson.FromJSON v => Aeson.Object -> String -> Aeson.Parser (Optional v)
-optionalKey object key = maybeToOptional <$> object Aeson..:? Text.pack key
+optionalKeyWith
+  :: (Aeson.Value -> Aeson.Parser v)
+  -> Aeson.Object
+  -> String
+  -> Aeson.Parser (Optional v)
+optionalKeyWith decode object key = do
+  maybeJson <- object Aeson..:? Text.pack key
+  case maybeJson of
+    Nothing -> pure $ maybeToOptional Nothing
+    Just json -> do
+      value <- decode json
+      pure . maybeToOptional $ Just value
 
 requiredKey :: Aeson.FromJSON v => Aeson.Object -> String -> Aeson.Parser v
 requiredKey object key = object Aeson..: Text.pack key
