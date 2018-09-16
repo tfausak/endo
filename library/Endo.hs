@@ -304,13 +304,13 @@ instance Binary.Binary Header where
     minorVersion <- Binary.get
     Header majorVersion minorVersion
       <$> getOptional (hasPatchVersion majorVersion minorVersion)
-      <*> Binary.get
+      <*> decodeUnicode
       <*> decodeBase64
   put header =
     Binary.put (headerMajorVersion header)
       <> Binary.put (headerMinorVersion header)
       <> putOptional (headerPatchVersion header)
-      <> Binary.put (headerLabel header)
+      <> encodeUnicode (headerLabel header)
       <> encodeBase64 (headerRest header)
 
 instance Aeson.FromJSON Header where
@@ -319,7 +319,7 @@ instance Aeson.FromJSON Header where
       <$> requiredKey object "majorVersion"
       <*> requiredKey object "minorVersion"
       <*> optionalKey object "patchVersion"
-      <*> requiredKey object "label"
+      <*> requiredKeyWith jsonToUnicode object "label"
       <*> requiredKeyWith jsonToBase64 object "rest"
 
 instance Aeson.ToJSON Header where
@@ -328,7 +328,7 @@ instance Aeson.ToJSON Header where
       $ toPair "majorVersion" (headerMajorVersion header)
       <> toPair "minorVersion" (headerMinorVersion header)
       <> toPair "patchVersion" (headerPatchVersion header)
-      <> toPair "label" (headerLabel header)
+      <> toPairWith unicodeToJson "label" (headerLabel header)
       <> toPairWith base64ToJson "rest" (headerRest header)
   toJSON = error "Header toJSON"
 
@@ -441,36 +441,37 @@ u32ToWord32 (U32 word32) = word32
 newtype Unicode
   = Unicode Text.Text
 
-instance Binary.Binary Unicode where
-  get = do
-    size <- i32ToInt32 <$> Binary.get
-    if size < 0
-      then fail "TODO: get utf 16"
-      else textToUnicode . Text.decodeLatin1 <$> Binary.getByteString
-        (int32ToInt size)
-  put unicode =
-    let text = unicodeToText unicode
-    in
-      if Text.all Char.isLatin1 text
-        then
-          let bytes = encodeLatin1 text
-          in
-            Binary.put (int32ToI32 . intToInt32 $ Bytes.length bytes)
-              <> Binary.putByteString bytes
-        else fail "TODO: put utf 16"
-
-instance Aeson.FromJSON Unicode where
-  parseJSON = fmap textToUnicode . Aeson.parseJSON
-
-instance Aeson.ToJSON Unicode where
-  toEncoding = Aeson.toEncoding . unicodeToText
-  toJSON = Aeson.toJSON . unicodeToText
-
 textToUnicode :: Text.Text -> Unicode
 textToUnicode = Unicode
 
 unicodeToText :: Unicode -> Text.Text
 unicodeToText (Unicode text) = text
+
+decodeUnicode :: Binary.Get Unicode
+decodeUnicode = do
+  size <- i32ToInt32 <$> Binary.get
+  if size < 0
+    then fail "TODO: get utf 16"
+    else textToUnicode . Text.decodeLatin1 <$> Binary.getByteString
+      (int32ToInt size)
+
+encodeUnicode :: Unicode -> Binary.Put
+encodeUnicode unicode =
+  let text = unicodeToText unicode
+  in
+    if Text.all Char.isLatin1 text
+      then
+        let bytes = encodeLatin1 text
+        in
+          Binary.put (int32ToI32 . intToInt32 $ Bytes.length bytes)
+            <> Binary.putByteString bytes
+      else fail "TODO: put utf 16"
+
+jsonToUnicode :: Aeson.Value -> Aeson.Parser Unicode
+jsonToUnicode = fmap textToUnicode . Aeson.parseJSON
+
+unicodeToJson :: Unicode -> Aeson.Encoding
+unicodeToJson = Aeson.toEncoding . unicodeToText
 
 
 newtype Base64
@@ -489,16 +490,16 @@ decodeBase64 =
 encodeBase64 :: Base64 -> Binary.Put
 encodeBase64 = Binary.putByteString . base64ToByteString
 
-base64ToJson :: Base64 -> Aeson.Encoding
-base64ToJson =
-  Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . base64ToByteString
-
 jsonToBase64 :: Aeson.Value -> Aeson.Parser Base64
 jsonToBase64 =
   Aeson.withText "Base64"
     $ either fail (pure . byteStringToBase64)
     . Base64.decode
     . Text.encodeUtf8
+
+base64ToJson :: Base64 -> Aeson.Encoding
+base64ToJson =
+  Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . base64ToByteString
 
 
 getInput :: Maybe FilePath -> IO Bytes.ByteString
