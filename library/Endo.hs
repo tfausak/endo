@@ -52,7 +52,6 @@ module Endo
   , Content(..)
   , I32(..)
   , Optional(..)
-  , U32(..)
   , Base64(..)
   )
 where
@@ -257,9 +256,9 @@ fromSection (Section a) = a
 
 decodeSection :: Binary.Get a -> Binary.Get (Section a)
 decodeSection decode = do
-  size <- decodeU32
-  expectedCrc <- u32ToWord32 <$> decodeU32
-  bytes <- Binary.getByteString . word32ToInt $ u32ToWord32 size
+  size <- bytesToWord32
+  expectedCrc <- bytesToWord32
+  bytes <- Binary.getByteString $ word32ToInt size
   let actualCrc = crc32Bytes crc32Table crc32Initial bytes
   Monad.when (actualCrc /= expectedCrc)
     . fail
@@ -277,8 +276,8 @@ encodeSection encode section =
   let
     bytes = LazyBytes.toStrict . Binary.runPut . encode $ fromSection section
   in
-    encodeU32 (word32ToU32 . intToWord32 $ Bytes.length bytes)
-    <> encodeU32 (word32ToU32 $ crc32Bytes crc32Table crc32Initial bytes)
+    word32ToBytes (intToWord32 $ Bytes.length bytes)
+    <> word32ToBytes (crc32Bytes crc32Table crc32Initial bytes)
     <> Binary.putByteString bytes
 
 jsonToSection
@@ -292,14 +291,14 @@ sectionToJson encode = encode . fromSection
 -- | The header or "meta" replay information. This includes everything that is
 -- shown in the in-game replay menu and then some.
 data Header = Header
-  { headerMajorVersion :: U32
+  { headerMajorVersion :: Word.Word32
   -- ^ The major or "engine" version number. Note that this isn't the same as
   -- Rocket League's marketing version number, which is usually something like
   -- "v1.52". You may be able to convert between the two, but there's no
   -- guarantee that it's a one-to-one mapping.
-  , headerMinorVersion :: U32
+  , headerMinorVersion :: Word.Word32
   -- ^ The minor or "licensee" version number.
-  , headerPatchVersion :: Optional U32
+  , headerPatchVersion :: Optional Word.Word32
   -- ^ The patch or "net" version number. Replays before v1.35 (the
   -- "anniversary update") don't have this field.
   , headerLabel :: Text.Text
@@ -311,45 +310,47 @@ data Header = Header
 
 decodeHeader :: Binary.Get Header
 decodeHeader = do
-  majorVersion <- decodeU32
-  minorVersion <- decodeU32
+  majorVersion <- bytesToWord32
+  minorVersion <- bytesToWord32
   Header majorVersion minorVersion
-    <$> decodeOptional decodeU32 (hasPatchVersion majorVersion minorVersion)
+    <$> decodeOptional
+          bytesToWord32
+          (hasPatchVersion majorVersion minorVersion)
     <*> bytesToText
     <*> decodeBase64
 
 encodeHeader :: Header -> Binary.Put
 encodeHeader header =
-  encodeU32 (headerMajorVersion header)
-    <> encodeU32 (headerMinorVersion header)
-    <> encodeOptional encodeU32 (headerPatchVersion header)
+  word32ToBytes (headerMajorVersion header)
+    <> word32ToBytes (headerMinorVersion header)
+    <> encodeOptional word32ToBytes (headerPatchVersion header)
     <> textToBytes (headerLabel header)
     <> encodeBase64 (headerRest header)
 
 jsonToHeader :: Aeson.Value -> Aeson.Parser Header
 jsonToHeader = Aeson.withObject "Header" $ \object ->
   Header
-    <$> requiredKeyWith jsonToU32 object "majorVersion"
-    <*> requiredKeyWith jsonToU32 object "minorVersion"
-    <*> optionalKeyWith jsonToU32 object "patchVersion"
+    <$> requiredKeyWith jsonToWord32 object "majorVersion"
+    <*> requiredKeyWith jsonToWord32 object "minorVersion"
+    <*> optionalKeyWith jsonToWord32 object "patchVersion"
     <*> requiredKeyWith jsonToText object "label"
     <*> requiredKeyWith jsonToBase64 object "rest"
 
 headerToJson :: Header -> Aeson.Encoding
 headerToJson header =
   Aeson.pairs
-    $ toPairWith u32ToJson "majorVersion" (headerMajorVersion header)
-    <> toPairWith u32ToJson "minorVersion" (headerMinorVersion header)
+    $ toPairWith word32ToJson "majorVersion" (headerMajorVersion header)
+    <> toPairWith word32ToJson "minorVersion" (headerMinorVersion header)
     <> toPairWith
-         (optionalToJson u32ToJson)
+         (optionalToJson word32ToJson)
          "patchVersion"
          (headerPatchVersion header)
     <> toPairWith textToJson "label" (headerLabel header)
     <> toPairWith base64ToJson "rest" (headerRest header)
 
-hasPatchVersion :: U32 -> U32 -> Bool
+hasPatchVersion :: Word.Word32 -> Word.Word32 -> Bool
 hasPatchVersion majorVersion minorVersion =
-  u32ToWord32 majorVersion >= 868 && u32ToWord32 minorVersion >= 18
+  majorVersion >= 868 && minorVersion >= 18
 
 
 -- | The content or "data" replay information. This includes everything that is
@@ -427,27 +428,17 @@ optionalToJson :: (a -> Aeson.Encoding) -> Optional a -> Aeson.Encoding
 optionalToJson encode = maybe Aeson.null_ encode . optionalToMaybe
 
 
--- | A 32-bit unsigned integer stored in little-endian byte order.
-newtype U32
-  = U32 Word.Word32
+bytesToWord32 :: Binary.Get Word.Word32
+bytesToWord32 = Binary.getWord32le
 
-word32ToU32 :: Word.Word32 -> U32
-word32ToU32 = U32
+word32ToBytes :: Word.Word32 -> Binary.Put
+word32ToBytes = Binary.putWord32le
 
-u32ToWord32 :: U32 -> Word.Word32
-u32ToWord32 (U32 word32) = word32
+jsonToWord32 :: Aeson.Value -> Aeson.Parser Word.Word32
+jsonToWord32 = Aeson.parseJSON
 
-decodeU32 :: Binary.Get U32
-decodeU32 = word32ToU32 <$> Binary.getWord32le
-
-encodeU32 :: U32 -> Binary.Put
-encodeU32 = Binary.putWord32le . u32ToWord32
-
-jsonToU32 :: Aeson.Value -> Aeson.Parser U32
-jsonToU32 = fmap word32ToU32 . Aeson.parseJSON
-
-u32ToJson :: U32 -> Aeson.Encoding
-u32ToJson = Aeson.toEncoding . u32ToWord32
+word32ToJson :: Word.Word32 -> Aeson.Encoding
+word32ToJson = Aeson.toEncoding
 
 
 bytesToText :: Binary.Get Text.Text
