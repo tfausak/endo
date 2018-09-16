@@ -217,17 +217,17 @@ data Replay = Replay
   }
 
 instance Binary.Binary Replay where
-  get = Binary.label "Replay" $ Replay <$> decodeSection Binary.get <*> decodeSection Binary.get
+  get = Binary.label "Replay" $ Replay <$> decodeSection Binary.get <*> decodeSection decodeContent
   put replay =
-    encodeSection Binary.put (replayHeader replay) <> encodeSection Binary.put (replayContent replay)
+    encodeSection Binary.put (replayHeader replay) <> encodeSection encodeContent (replayContent replay)
 
 instance Aeson.FromJSON Replay where
   parseJSON = Aeson.withObject "Replay" $ \object ->
-    Replay <$> requiredKeyWith (jsonToSection Aeson.parseJSON) object "header" <*> requiredKeyWith (jsonToSection Aeson.parseJSON) object "content"
+    Replay <$> requiredKeyWith (jsonToSection Aeson.parseJSON) object "header" <*> requiredKeyWith (jsonToSection jsonToContent) object "content"
 
 instance Aeson.ToJSON Replay where
   toEncoding replay =
-    Aeson.pairs $ toPairWith (sectionToJson Aeson.toEncoding) "header" (replayHeader replay) <> toPairWith (sectionToJson Aeson.toEncoding)
+    Aeson.pairs $ toPairWith (sectionToJson Aeson.toEncoding) "header" (replayHeader replay) <> toPairWith (sectionToJson contentToJson)
       "content"
       (replayContent replay)
   toJSON = error "Replay toJSON"
@@ -343,19 +343,23 @@ hasPatchVersion majorVersion minorVersion =
 newtype Content
   = Content Base64
 
-instance Binary.Binary Content where
-  get = Content <$> decodeBase64
-  put = encodeBase64 . unwrapContent
+base64ToContent :: Base64 -> Content
+base64ToContent = Content
 
-instance Aeson.FromJSON Content where
-  parseJSON = fmap Content . jsonToBase64
+contentToBase64 :: Content -> Base64
+contentToBase64 (Content base64) = base64
 
-instance Aeson.ToJSON Content where
-  toEncoding = base64ToJson . unwrapContent
-  toJSON = error "Content toJSON"
+decodeContent :: Binary.Get Content
+decodeContent = base64ToContent <$> decodeBase64
 
-unwrapContent :: Content -> Base64
-unwrapContent (Content base64) = base64
+encodeContent :: Content -> Binary.Put
+encodeContent = encodeBase64 . contentToBase64
+
+jsonToContent :: Aeson.Value -> Aeson.Parser Content
+jsonToContent = fmap base64ToContent . jsonToBase64
+
+contentToJson :: Content -> Aeson.Encoding
+contentToJson = base64ToJson . contentToBase64
 
 
 -- | A 32-bit signed integer stored in little-endian byte order.
