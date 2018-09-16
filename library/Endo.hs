@@ -50,8 +50,10 @@ module Endo
   , Section(..)
   , Header(..)
   , Content(..)
+  , I32(..)
   , Optional(..)
   , U32(..)
+  , Unicode(..)
   , Base64(..)
   )
 where
@@ -65,7 +67,10 @@ import qualified Data.Binary.Put as Binary
 import qualified Data.Bits as Bits
 import qualified Data.ByteString as Bytes
 import qualified Data.ByteString.Base64 as Base64
+import qualified Data.ByteString.Char8 as Latin1
 import qualified Data.ByteString.Lazy as LazyBytes
+import qualified Data.Char as Char
+import qualified Data.Int as Int
 import qualified Data.List as List
 import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
@@ -123,34 +128,34 @@ import qualified Text.Printf as Printf
 -- @--output OUTPUT@ to @< INPUT@ and @> OUTPUT@ respectively. Windows attempts
 -- to encode pipes as UTF-16, which can give unexpected results.
 --
+-- Decode a binary replay file and output a JSON replay file. This is by far
+-- the most common way to use Endo.
+--
 -- > $ endo < example.replay > example.json
 -- > $ endo -i example.replay -o example.json
 -- > $ endo --mode decode --input example.replay --output example.json
 --
--- Decodes a binary replay file and outputs a JSON replay file. This is by far
--- the most common way to use Endo.
+-- Decode a binary replay file and output JSON replay to 'IO.stdout'. Note that
+-- in the first example @--mode@ is optional because the default mode is
+-- @decode@.
 --
 -- > $ endo < example.replay
 -- > $ endo -i example.replay
 -- > $ endo --mode decode --input example.replay
 --
--- Decodes a binary replay file and outputs JSON replay to 'IO.stdout'. Note
--- that in the first example @--mode@ is optional because the default mode is
--- @decode@.
+-- Encode a JSON replay file and output a binary replay file.
 --
 -- > $ endo -m encode < example.json > example.replay
 -- > $ endo -i example.json -o example.replay
 -- > $ endo --mode encode --input example.json --output example.replay
 --
--- Encodes a JSON replay file and outputs a binary replay file.
+-- Encode a JSON replay file and output a binary replay to 'IO.stdout'. Note
+-- that in the first example @--mode@ is required, otherwise it would default
+-- to @decode@. Endo does not know the name of the file piped to 'IO.stdin'.
 --
 -- > $ endo -m encode < example.json
 -- > $ endo -i example.json
 -- > $ endo --mode encode --input example.json
---
--- Encodes a JSON replay file and outputs a binary replay to 'IO.stdout'. Note
--- that in the first example @--mode@ is required, otherwise it would default
--- to @decode@. Endo does not know the name of the file piped to 'IO.stdin'.
 main :: IO ()
 main = do
   name <- Environment.getProgName
@@ -285,6 +290,10 @@ data Header = Header
   , headerPatchVersion :: Optional U32
   -- ^ The patch or "net" version number. Replays before v1.35 (the
   -- "anniversary update") don't have this field.
+  , headerLabel :: Unicode
+  -- ^ The label, which is always @\"TAGame.Replay_Soccar_TA\"@. This is most
+  -- likely a [magic number](https://en.wikipedia.org/wiki/Magic_number_\(programming\))
+  -- for the replay file format.
   , headerRest :: Base64
   }
 
@@ -295,10 +304,12 @@ instance Binary.Binary Header where
     Header majorVersion minorVersion
       <$> getOptional (hasPatchVersion majorVersion minorVersion)
       <*> Binary.get
+      <*> Binary.get
   put header =
     Binary.put (headerMajorVersion header)
       <> Binary.put (headerMinorVersion header)
       <> putOptional (headerPatchVersion header)
+      <> Binary.put (headerLabel header)
       <> Binary.put (headerRest header)
 
 instance Aeson.FromJSON Header where
@@ -307,6 +318,7 @@ instance Aeson.FromJSON Header where
       <$> requiredKey object "majorVersion"
       <*> requiredKey object "minorVersion"
       <*> optionalKey object "patchVersion"
+      <*> requiredKey object "label"
       <*> requiredKey object "rest"
 
 instance Aeson.ToJSON Header where
@@ -315,11 +327,13 @@ instance Aeson.ToJSON Header where
       $ toPair "majorVersion" (headerMajorVersion header)
       <> toPair "minorVersion" (headerMinorVersion header)
       <> toPair "patchVersion" (headerPatchVersion header)
+      <> toPair "label" (headerLabel header)
       <> toPair "rest" (headerRest header)
   toJSON header = Aeson.object
     [ toPair "majorVersion" $ headerMajorVersion header
     , toPair "minorVersion" $ headerMinorVersion header
     , toPair "patchVersion" $ headerPatchVersion header
+    , toPair "label" $ headerLabel header
     , toPair "rest" $ headerRest header
     ]
 
@@ -346,6 +360,31 @@ instance Aeson.ToJSON Content where
 
 unwrapContent :: Content -> Base64
 unwrapContent (Content base64) = base64
+
+
+-- | A 32-bit signed integer stored in little-endian byte order.
+newtype I32
+  = I32 Int.Int32
+
+instance Binary.Binary I32 where
+  get = int32ToI32 <$> Binary.getInt32le
+  put = Binary.putInt32le . i32ToInt32
+
+instance Aeson.FromJSON I32 where
+  parseJSON = fmap int32ToI32 . Aeson.parseJSON
+
+instance Show I32 where
+  show = Printf.printf "0x%08x" . i32ToInt32
+
+instance Aeson.ToJSON I32 where
+  toEncoding = Aeson.toEncoding . i32ToInt32
+  toJSON = Aeson.toJSON . i32ToInt32
+
+int32ToI32 :: Int.Int32 -> I32
+int32ToI32 = I32
+
+i32ToInt32 :: I32 -> Int.Int32
+i32ToInt32 (I32 int32) = int32
 
 
 -- | A value that may or may not exist. This type mostly exists to /avoid/ the
@@ -398,6 +437,45 @@ word32ToU32 = U32
 
 u32ToWord32 :: U32 -> Word.Word32
 u32ToWord32 (U32 word32) = word32
+
+
+-- | Either Latin-1 (ISO 8859-1) or UTF-16 encoded text. By default Rocket
+-- League encodes text as Latin-1 using 8 bits per character. If any characters
+-- cannot be represented in Latin-1, Rocket League encodes the entire text as
+-- UTF-16 with little-endian byte order, using 16 bits per character.
+newtype Unicode
+  = Unicode Text.Text
+
+instance Binary.Binary Unicode where
+  get = do
+    size <- i32ToInt32 <$> Binary.get
+    if size < 0
+      then fail "TODO: get utf 16"
+      else textToUnicode . Text.decodeLatin1 <$> Binary.getByteString
+        (int32ToInt size)
+  put unicode =
+    let text = unicodeToText unicode
+    in
+      if Text.all Char.isLatin1 text
+        then
+          let bytes = encodeLatin1 text
+          in
+            Binary.put (int32ToI32 . intToInt32 $ Bytes.length bytes)
+              <> Binary.putByteString bytes
+        else fail "TODO: put utf 16"
+
+instance Aeson.FromJSON Unicode where
+  parseJSON = fmap textToUnicode . Aeson.parseJSON
+
+instance Aeson.ToJSON Unicode where
+  toEncoding = Aeson.toEncoding . unicodeToText
+  toJSON = Aeson.toJSON . unicodeToText
+
+textToUnicode :: Text.Text -> Unicode
+textToUnicode = Unicode
+
+unicodeToText :: Unicode -> Text.Text
+unicodeToText (Unicode text) = text
 
 
 newtype Base64
@@ -896,8 +974,17 @@ die message = do
   warn message
   Exit.exitFailure
 
+encodeLatin1 :: Text.Text -> Bytes.ByteString
+encodeLatin1 = Latin1.pack . Text.unpack
+
 hasExtension :: String -> FilePath -> Bool
 hasExtension = List.isSuffixOf
+
+int32ToInt :: Int.Int32 -> Int
+int32ToInt = fromIntegral
+
+intToInt32 :: Int -> Int.Int32
+intToInt32 = fromIntegral
 
 intToWord32 :: Int -> Word.Word32
 intToWord32 = fromIntegral
