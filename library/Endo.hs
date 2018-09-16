@@ -227,17 +227,14 @@ encodeReplay replay =
 jsonToReplay :: Aeson.Value -> Aeson.Parser Replay
 jsonToReplay = Aeson.withObject "Replay" $ \object ->
   Replay
-    <$> requiredKeyWith (jsonToSection jsonToHeader) object "header"
-    <*> requiredKeyWith (jsonToSection jsonToContent) object "content"
+    <$> requiredKey (jsonToSection jsonToHeader) object "header"
+    <*> requiredKey (jsonToSection jsonToContent) object "content"
 
 replayToJson_ :: Replay -> Aeson.Encoding
 replayToJson_ replay =
   Aeson.pairs
-    $ toPairWith (sectionToJson headerToJson) "header" (replayHeader replay)
-    <> toPairWith
-         (sectionToJson contentToJson)
-         "content"
-         (replayContent replay)
+    $ toPair (sectionToJson headerToJson) "header" (replayHeader replay)
+    <> toPair (sectionToJson contentToJson) "content" (replayContent replay)
 
 
 -- | A high-level section of a replay. Rocket League replays are split up into
@@ -326,23 +323,23 @@ encodeHeader header =
 jsonToHeader :: Aeson.Value -> Aeson.Parser Header
 jsonToHeader = Aeson.withObject "Header" $ \object ->
   Header
-    <$> requiredKeyWith jsonToWord32 object "majorVersion"
-    <*> requiredKeyWith jsonToWord32 object "minorVersion"
-    <*> optionalKeyWith jsonToWord32 object "patchVersion"
-    <*> requiredKeyWith jsonToText object "label"
-    <*> requiredKeyWith jsonToBase64 object "rest"
+    <$> requiredKey jsonToWord32 object "majorVersion"
+    <*> requiredKey jsonToWord32 object "minorVersion"
+    <*> optionalKey jsonToWord32 object "patchVersion"
+    <*> requiredKey jsonToText object "label"
+    <*> requiredKey jsonToBase64 object "rest"
 
 headerToJson :: Header -> Aeson.Encoding
 headerToJson header =
   Aeson.pairs
-    $ toPairWith word32ToJson "majorVersion" (headerMajorVersion header)
-    <> toPairWith word32ToJson "minorVersion" (headerMinorVersion header)
-    <> toPairWith
+    $ toPair word32ToJson "majorVersion" (headerMajorVersion header)
+    <> toPair word32ToJson "minorVersion" (headerMinorVersion header)
+    <> toPair
          (maybeToJson word32ToJson)
          "patchVersion"
          (headerPatchVersion header)
-    <> toPairWith textToJson "label" (headerLabel header)
-    <> toPairWith base64ToJson "rest" (headerRest header)
+    <> toPair textToJson "label" (headerLabel header)
+    <> toPair base64ToJson "rest" (headerRest header)
 
 hasPatchVersion :: Word.Word32 -> Word.Word32 -> Bool
 hasPatchVersion majorVersion minorVersion =
@@ -949,31 +946,29 @@ intToInt32 = fromIntegral
 intToWord32 :: Int -> Word.Word32
 intToWord32 = fromIntegral
 
-optionalKeyWith
+optionalKey
   :: (Aeson.Value -> Aeson.Parser v)
   -> Aeson.Object
   -> String
   -> Aeson.Parser (Maybe v)
-optionalKeyWith decode object key = do
-  maybeJson <- object Aeson..:? Text.pack key
-  case maybeJson of
-    Nothing -> pure Nothing
-    Just json -> jsonToMaybe decode json
+optionalKey decode object key = do
+  value <- object Aeson..:? Text.pack key
+  maybe (pure Nothing) (jsonToMaybe decode) value
 
-requiredKeyWith
+requiredKey
   :: (Aeson.Value -> Aeson.Parser v)
   -> Aeson.Object
   -> String
   -> Aeson.Parser v
-requiredKeyWith decode object key = do
+requiredKey decode object key = do
   json <- object Aeson..: Text.pack key
   decode json
 
 third :: (a, b, c) -> c
 third (_, _, c) = c
 
-toPairWith :: (v -> Aeson.Encoding) -> String -> v -> Aeson.Series
-toPairWith encode key = Aeson.pairStr key . encode
+toPair :: (v -> Aeson.Encoding) -> String -> v -> Aeson.Series
+toPair encode key = Aeson.pairStr key . encode
 
 warnLn :: String -> IO ()
 warnLn = IO.hPutStrLn IO.stderr
