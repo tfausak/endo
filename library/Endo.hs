@@ -31,8 +31,6 @@ module Endo
 where
 
 import qualified Control.Monad as Monad
-import qualified Control.Monad.Trans.Class as Trans
-import qualified Control.Monad.Trans.State.Strict as State
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encoding as Aeson
 import qualified Data.Aeson.Types as Aeson
@@ -501,19 +499,19 @@ floatToJson = Aeson.toEncoding
 
 
 bytesToHashMap :: Binary.Get v -> Binary.Get (HashMap.HashMap Text.Text v)
-bytesToHashMap decode =
-  State.execStateT (bytesToHashMapHelper decode) HashMap.empty
+bytesToHashMap decode = bytesToHashMapWith decode HashMap.empty
 
-bytesToHashMapHelper
-  :: Binary.Get v -> State.StateT (HashMap.HashMap Text.Text v) Binary.Get ()
-bytesToHashMapHelper decode = do
-  key <- Trans.lift bytesToText
+bytesToHashMapWith
+  :: Binary.Get v
+  -> HashMap.HashMap Text.Text v
+  -> Binary.Get (HashMap.HashMap Text.Text v)
+bytesToHashMapWith decode hashMap = do
+  key <- bytesToText
   if key == "None"
-    then pure ()
+    then pure hashMap
     else do
-      value <- Trans.lift decode
-      State.modify' $ HashMap.insert key value
-      bytesToHashMapHelper decode
+      value <- decode
+      bytesToHashMapWith decode $ HashMap.insert key value hashMap
 
 hashMapToBytes
   :: (v -> Binary.Put) -> HashMap.HashMap Text.Text v -> Binary.Put
