@@ -60,6 +60,7 @@ where
 
 import qualified Control.Monad as Monad
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Encoding as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.Binary as Binary
 import qualified Data.Binary.Get as Binary
@@ -304,13 +305,13 @@ instance Binary.Binary Header where
     Header majorVersion minorVersion
       <$> getOptional (hasPatchVersion majorVersion minorVersion)
       <*> Binary.get
-      <*> Binary.get
+      <*> decodeBase64
   put header =
     Binary.put (headerMajorVersion header)
       <> Binary.put (headerMinorVersion header)
       <> putOptional (headerPatchVersion header)
       <> Binary.put (headerLabel header)
-      <> Binary.put (headerRest header)
+      <> encodeBase64 (headerRest header)
 
 instance Aeson.FromJSON Header where
   parseJSON = Aeson.withObject "Header" $ \object ->
@@ -319,7 +320,7 @@ instance Aeson.FromJSON Header where
       <*> requiredKey object "minorVersion"
       <*> optionalKey object "patchVersion"
       <*> requiredKey object "label"
-      <*> requiredKey object "rest"
+      <*> requiredKeyWith jsonToBase64 object "rest"
 
 instance Aeson.ToJSON Header where
   toEncoding header =
@@ -328,14 +329,8 @@ instance Aeson.ToJSON Header where
       <> toPair "minorVersion" (headerMinorVersion header)
       <> toPair "patchVersion" (headerPatchVersion header)
       <> toPair "label" (headerLabel header)
-      <> toPair "rest" (headerRest header)
-  toJSON header = Aeson.object
-    [ toPair "majorVersion" $ headerMajorVersion header
-    , toPair "minorVersion" $ headerMinorVersion header
-    , toPair "patchVersion" $ headerPatchVersion header
-    , toPair "label" $ headerLabel header
-    , toPair "rest" $ headerRest header
-    ]
+      <> toPairWith base64ToJson "rest" (headerRest header)
+  toJSON = error "Header toJSON"
 
 hasPatchVersion :: U32 -> U32 -> Bool
 hasPatchVersion majorVersion minorVersion =
@@ -348,15 +343,15 @@ newtype Content
   = Content Base64
 
 instance Binary.Binary Content where
-  get = Content <$> Binary.get
-  put = Binary.put . unwrapContent
+  get = Content <$> decodeBase64
+  put = encodeBase64 . unwrapContent
 
 instance Aeson.FromJSON Content where
-  parseJSON = fmap Content . Aeson.parseJSON
+  parseJSON = fmap Content . jsonToBase64
 
 instance Aeson.ToJSON Content where
-  toEncoding = Aeson.toEncoding . unwrapContent
-  toJSON = Aeson.toJSON . unwrapContent
+  toEncoding = base64ToJson . unwrapContent
+  toJSON = error "Content toJSON"
 
 unwrapContent :: Content -> Base64
 unwrapContent (Content base64) = base64
@@ -481,24 +476,29 @@ unicodeToText (Unicode text) = text
 newtype Base64
   = Base64 Bytes.ByteString
 
-instance Binary.Binary Base64 where
-  get = Base64 . LazyBytes.toStrict <$> Binary.getRemainingLazyByteString
-  put = Binary.putByteString . unwrapBase64
+byteStringToBase64 :: Bytes.ByteString -> Base64
+byteStringToBase64 = Base64
 
-instance Aeson.FromJSON Base64 where
-  parseJSON =
-    Aeson.withText "Base64"
-      $ either fail (pure . Base64)
-      . Base64.decode
-      . Text.encodeUtf8
+base64ToByteString :: Base64 -> Bytes.ByteString
+base64ToByteString (Base64 bytes) = bytes
 
-instance Aeson.ToJSON Base64 where
-  toEncoding =
-    Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . unwrapBase64
-  toJSON = Aeson.toJSON . Text.decodeUtf8 . Base64.encode . unwrapBase64
+decodeBase64 :: Binary.Get Base64
+decodeBase64 =
+  byteStringToBase64 . LazyBytes.toStrict <$> Binary.getRemainingLazyByteString
 
-unwrapBase64 :: Base64 -> Bytes.ByteString
-unwrapBase64 (Base64 bytes) = bytes
+encodeBase64 :: Base64 -> Binary.Put
+encodeBase64 = Binary.putByteString . base64ToByteString
+
+base64ToJson :: Base64 -> Aeson.Encoding
+base64ToJson =
+  Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . base64ToByteString
+
+jsonToBase64 :: Aeson.Value -> Aeson.Parser Base64
+jsonToBase64 =
+  Aeson.withText "Base64"
+    $ either fail (pure . byteStringToBase64)
+    . Base64.decode
+    . Text.encodeUtf8
 
 
 getInput :: Maybe FilePath -> IO Bytes.ByteString
@@ -996,11 +996,23 @@ optionalKey object key = maybeToOptional <$> object Aeson..:? Text.pack key
 requiredKey :: Aeson.FromJSON v => Aeson.Object -> String -> Aeson.Parser v
 requiredKey object key = object Aeson..: Text.pack key
 
+requiredKeyWith
+  :: (Aeson.Value -> Aeson.Parser v)
+  -> Aeson.Object
+  -> String
+  -> Aeson.Parser v
+requiredKeyWith decode object key = do
+  json <- object Aeson..: Text.pack key
+  decode json
+
 third :: (a, b, c) -> c
 third (_, _, c) = c
 
 toPair :: (Aeson.ToJSON v, Aeson.KeyValue p) => String -> v -> p
 toPair key value = Text.pack key Aeson..= value
+
+toPairWith :: (v -> Aeson.Encoding) -> String -> v -> Aeson.Series
+toPairWith encode key = Aeson.pairStr key . encode
 
 warnLn :: String -> IO ()
 warnLn = IO.hPutStrLn IO.stderr

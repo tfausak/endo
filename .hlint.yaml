@@ -7,6 +7,7 @@
   - default: false
   - { name: Control.Monad, as: Monad }
   - { name: Data.Aeson, as: Aeson }
+  - { name: Data.Aeson.Encoding, as: Aeson }
   - { name: Data.Aeson.Types, as: Aeson }
   - { name: Data.Binary, as: Binary }
   - { name: Data.Binary.Get, as: Binary }
