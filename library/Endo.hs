@@ -84,7 +84,6 @@ import qualified System.Console.GetOpt as Console
 import qualified System.Environment as Environment
 import qualified System.Exit as Exit
 import qualified System.IO as IO
-import qualified Text.Printf as Printf
 
 
 -- | == Options
@@ -361,25 +360,17 @@ unwrapContent (Content base64) = base64
 newtype I32
   = I32 Int.Int32
 
-instance Binary.Binary I32 where
-  get = int32ToI32 <$> Binary.getInt32le
-  put = Binary.putInt32le . i32ToInt32
-
-instance Aeson.FromJSON I32 where
-  parseJSON = fmap int32ToI32 . Aeson.parseJSON
-
-instance Show I32 where
-  show = Printf.printf "0x%08x" . i32ToInt32
-
-instance Aeson.ToJSON I32 where
-  toEncoding = Aeson.toEncoding . i32ToInt32
-  toJSON = Aeson.toJSON . i32ToInt32
-
 int32ToI32 :: Int.Int32 -> I32
 int32ToI32 = I32
 
 i32ToInt32 :: I32 -> Int.Int32
 i32ToInt32 (I32 int32) = int32
+
+decodeI32 :: Binary.Get I32
+decodeI32 = int32ToI32 <$> Binary.getInt32le
+
+encodeI32 :: I32 -> Binary.Put
+encodeI32 = Binary.putInt32le . i32ToInt32
 
 
 -- | A value that may or may not exist. This type mostly exists to /avoid/ the
@@ -404,9 +395,6 @@ decodeOptional decode condition =
 encodeOptional :: (a -> Binary.Put) -> Optional a -> Binary.Put
 encodeOptional encode = maybe mempty encode . optionalToMaybe
 
-optionalToJson :: (a -> Aeson.Encoding) -> Optional a -> Aeson.Encoding
-optionalToJson encode = maybe Aeson.null_ encode . optionalToMaybe
-
 jsonToOptional
   :: (Aeson.Value -> Aeson.Parser a)
   -> Aeson.Value
@@ -414,6 +402,9 @@ jsonToOptional
 jsonToOptional decode json = do
   value <- Aeson.parseJSON json
   maybeToOptional <$> maybe (pure Nothing) (fmap Just . decode) value
+
+optionalToJson :: (a -> Aeson.Encoding) -> Optional a -> Aeson.Encoding
+optionalToJson encode = maybe Aeson.null_ encode . optionalToMaybe
 
 
 -- | A 32-bit unsigned integer stored in little-endian byte order.
@@ -454,7 +445,7 @@ unicodeToText (Unicode text) = text
 
 decodeUnicode :: Binary.Get Unicode
 decodeUnicode = do
-  size <- i32ToInt32 <$> Binary.get
+  size <- i32ToInt32 <$> decodeI32
   if size < 0
     then fail "TODO: get utf 16"
     else textToUnicode . Text.decodeLatin1 <$> Binary.getByteString
@@ -468,7 +459,7 @@ encodeUnicode unicode =
       then
         let bytes = encodeLatin1 text
         in
-          Binary.put (int32ToI32 . intToInt32 $ Bytes.length bytes)
+          encodeI32 (int32ToI32 . intToInt32 $ Bytes.length bytes)
             <> Binary.putByteString bytes
       else fail "TODO: put utf 16"
 
