@@ -222,12 +222,12 @@ data Replay = Replay
 
 decodeReplay :: Binary.Get Replay
 decodeReplay =
-  Replay <$> decodeSection decodeHeader <*> decodeSection decodeContent
+  Replay <$> decodeSection decodeHeader <*> decodeSection bytesToContent
 
 encodeReplay :: Replay -> Binary.Put
 encodeReplay replay =
   encodeSection encodeHeader (replayHeader replay)
-    <> encodeSection encodeContent (replayContent replay)
+    <> encodeSection contentToBytes (replayContent replay)
 
 jsonToReplay :: Aeson.Value -> Aeson.Parser Replay
 jsonToReplay = Aeson.withObject "Replay" $ \object ->
@@ -460,26 +460,31 @@ propertyToJson property = Aeson.pairs $ case property of
 
 -- | The content or "data" replay information. This includes everything that is
 -- shown when watching a replay in game.
-newtype Content
-  = Content Base64
+data Content = Content
+  { contentLevels :: Vector.Vector Text.Text
+  -- ^ It's not entirely clear what this represents. Typically there is only
+  -- one level, like @"stadium_oob_audio_map"@.
+  , contentRest :: Base64
+  }
 
-base64ToContent :: Base64 -> Content
-base64ToContent = Content
+bytesToContent :: Binary.Get Content
+bytesToContent = Content <$> bytesToVector bytesToText <*> bytesToBase64
 
-contentToBase64 :: Content -> Base64
-contentToBase64 (Content base64) = base64
-
-decodeContent :: Binary.Get Content
-decodeContent = base64ToContent <$> bytesToBase64
-
-encodeContent :: Content -> Binary.Put
-encodeContent = base64ToBytes . contentToBase64
+contentToBytes :: Content -> Binary.Put
+contentToBytes content = vectorToBytes textToBytes (contentLevels content)
+  <> base64ToBytes (contentRest content)
 
 jsonToContent :: Aeson.Value -> Aeson.Parser Content
-jsonToContent = fmap base64ToContent . jsonToBase64
+jsonToContent = Aeson.withObject "Content" $ \object ->
+  Content
+    <$> requiredKey (jsonToVector jsonToText) object "levels"
+    <*> requiredKey jsonToBase64 object "rest"
 
 contentToJson :: Content -> Aeson.Encoding
-contentToJson = base64ToJson . contentToBase64
+contentToJson content =
+  Aeson.pairs
+    $ toPair (vectorToJson textToJson) "levels" (contentLevels content)
+    <> toPair base64ToJson "rest" (contentRest content)
 
 
 bytesToFloat :: Binary.Get Float
@@ -605,6 +610,26 @@ jsonToText = Aeson.parseJSON
 
 textToJson :: Text.Text -> Aeson.Encoding
 textToJson = Aeson.toEncoding
+
+
+bytesToVector :: Binary.Get a -> Binary.Get (Vector.Vector a)
+bytesToVector decode = do
+  size <- bytesToWord32
+  Vector.replicateM (word32ToInt size) decode
+
+vectorToBytes :: (a -> Binary.Put) -> Vector.Vector a -> Binary.Put
+vectorToBytes encode vector = do
+  word32ToBytes . intToWord32 $ Vector.length vector
+  Vector.mapM_ encode vector
+
+jsonToVector
+  :: (Aeson.Value -> Aeson.Parser a)
+  -> Aeson.Value
+  -> Aeson.Parser (Vector.Vector a)
+jsonToVector = Aeson.withArray "Vector" . mapM
+
+vectorToJson :: (a -> Aeson.Encoding) -> Vector.Vector a -> Aeson.Encoding
+vectorToJson encode = Aeson.list encode . Vector.toList
 
 
 -- | This is a placeholder data type that will eventually go away. It's used
