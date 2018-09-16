@@ -217,17 +217,17 @@ data Replay = Replay
   }
 
 instance Binary.Binary Replay where
-  get = Binary.label "Replay" $ Replay <$> decodeSection Binary.get <*> decodeSection decodeContent
+  get = Binary.label "Replay" $ Replay <$> decodeSection decodeHeader <*> decodeSection decodeContent
   put replay =
-    encodeSection Binary.put (replayHeader replay) <> encodeSection encodeContent (replayContent replay)
+    encodeSection encodeHeader (replayHeader replay) <> encodeSection encodeContent (replayContent replay)
 
 instance Aeson.FromJSON Replay where
   parseJSON = Aeson.withObject "Replay" $ \object ->
-    Replay <$> requiredKeyWith (jsonToSection Aeson.parseJSON) object "header" <*> requiredKeyWith (jsonToSection jsonToContent) object "content"
+    Replay <$> requiredKeyWith (jsonToSection jsonToHeader) object "header" <*> requiredKeyWith (jsonToSection jsonToContent) object "content"
 
 instance Aeson.ToJSON Replay where
   toEncoding replay =
-    Aeson.pairs $ toPairWith (sectionToJson Aeson.toEncoding) "header" (replayHeader replay) <> toPairWith (sectionToJson contentToJson)
+    Aeson.pairs $ toPairWith (sectionToJson headerToJson) "header" (replayHeader replay) <> toPairWith (sectionToJson contentToJson)
       "content"
       (replayContent replay)
   toJSON = error "Replay toJSON"
@@ -299,39 +299,43 @@ data Header = Header
   , headerRest :: Base64
   }
 
-instance Binary.Binary Header where
-  get = Binary.label "Header" $ do
-    majorVersion <- decodeU32
-    minorVersion <- decodeU32
-    Header majorVersion minorVersion
-      <$> decodeOptional decodeU32 (hasPatchVersion majorVersion minorVersion)
-      <*> decodeUnicode
-      <*> decodeBase64
-  put header =
-    encodeU32 (headerMajorVersion header)
-      <> encodeU32 (headerMinorVersion header)
-      <> encodeOptional encodeU32 (headerPatchVersion header)
-      <> encodeUnicode (headerLabel header)
-      <> encodeBase64 (headerRest header)
+decodeHeader :: Binary.Get Header
+decodeHeader = do
+  majorVersion <- decodeU32
+  minorVersion <- decodeU32
+  Header majorVersion minorVersion
+    <$> decodeOptional decodeU32 (hasPatchVersion majorVersion minorVersion)
+    <*> decodeUnicode
+    <*> decodeBase64
 
-instance Aeson.FromJSON Header where
-  parseJSON = Aeson.withObject "Header" $ \object ->
-    Header
-      <$> requiredKeyWith jsonToU32 object "majorVersion"
-      <*> requiredKeyWith jsonToU32 object "minorVersion"
-      <*> optionalKeyWith jsonToU32 object "patchVersion"
-      <*> requiredKeyWith jsonToUnicode object "label"
-      <*> requiredKeyWith jsonToBase64 object "rest"
+encodeHeader :: Header -> Binary.Put
+encodeHeader header =
+  encodeU32 (headerMajorVersion header)
+    <> encodeU32 (headerMinorVersion header)
+    <> encodeOptional encodeU32 (headerPatchVersion header)
+    <> encodeUnicode (headerLabel header)
+    <> encodeBase64 (headerRest header)
 
-instance Aeson.ToJSON Header where
-  toEncoding header =
-    Aeson.pairs
-      $ toPairWith u32ToJson "majorVersion" (headerMajorVersion header)
-      <> toPairWith u32ToJson "minorVersion" (headerMinorVersion header)
-      <> toPairWith (optionalToJson u32ToJson) "patchVersion" (headerPatchVersion header)
-      <> toPairWith unicodeToJson "label" (headerLabel header)
-      <> toPairWith base64ToJson "rest" (headerRest header)
-  toJSON = error "Header toJSON"
+jsonToHeader :: Aeson.Value -> Aeson.Parser Header
+jsonToHeader = Aeson.withObject "Header" $ \object ->
+  Header
+    <$> requiredKeyWith jsonToU32 object "majorVersion"
+    <*> requiredKeyWith jsonToU32 object "minorVersion"
+    <*> optionalKeyWith jsonToU32 object "patchVersion"
+    <*> requiredKeyWith jsonToUnicode object "label"
+    <*> requiredKeyWith jsonToBase64 object "rest"
+
+headerToJson :: Header -> Aeson.Encoding
+headerToJson header =
+  Aeson.pairs
+    $ toPairWith u32ToJson "majorVersion" (headerMajorVersion header)
+    <> toPairWith u32ToJson "minorVersion" (headerMinorVersion header)
+    <> toPairWith
+         (optionalToJson u32ToJson)
+         "patchVersion"
+         (headerPatchVersion header)
+    <> toPairWith unicodeToJson "label" (headerLabel header)
+    <> toPairWith base64ToJson "rest" (headerRest header)
 
 hasPatchVersion :: U32 -> U32 -> Bool
 hasPatchVersion majorVersion minorVersion =
