@@ -14,33 +14,6 @@
 -- Endo is a command-line application. You should only use it if you're
 -- comfortable running things in terminals or command prompts. Otherwise
 -- consider using another tool like [Ball Chasing](https://ballchasing.com).
---
--- If you're looking for replay files on your machine, they can be found in the
--- following directories:
---
--- [Windows]: [ ](#haddock-requires-something-here)
---
---     > %UserProfile%\Documents\My Games\Rocket League\TAGame\Demos
---
---     For example:
---
---     > C:\Users\Taylor\Documents\My Games\Rocket League\TAGame\Demos
---
--- [MacOS]: [ ](#haddock-requires-something-here)
---
---     > $HOME/Library/Application Support/Rocket League/TAGame/Demos
---
---     For example:
---
---     > /Users/taylor/Library/Application Support/Rocket League/TAGame/Demos
---
--- [Linux]: [ ](#haddock-requires-something-here)
---
---     > $HOME/.local/share/Rocket League/TAGame/Demos
---
---     For example:
---
---     > /home/taylor/.local/share/Rocket League/TAGame/Demos
 module Endo
   ( main
   , mainWith
@@ -103,6 +76,33 @@ import qualified Unsafe.Coerce as Unsafe
 -- [@--input FILE@, @-i FILE@] Specifies the input file. If this option is not
 -- given, input will be read from 'IO.stdin'.
 --
+--     If you're looking for replay files on your machine, they can be found in
+--     the following directories:
+--
+--     [Windows]: [ ](#haddock-requires-something-here)
+--
+--         > %UserProfile%\Documents\My Games\Rocket League\TAGame\Demos
+--
+--         For example:
+--
+--         > C:\Users\Taylor\Documents\My Games\Rocket League\TAGame\Demos
+--
+--     [MacOS]: [ ](#haddock-requires-something-here)
+--
+--         > $HOME/Library/Application Support/Rocket League/TAGame/Demos
+--
+--         For example:
+--
+--         > /Users/taylor/Library/Application Support/Rocket League/TAGame/Demos
+--
+--     [Linux]: [ ](#haddock-requires-something-here)
+--
+--         > $HOME/.local/share/Rocket League/TAGame/Demos
+--
+--         For example:
+--
+--         > /home/taylor/.local/share/Rocket League/TAGame/Demos
+--
 -- [@--output FILE@, @-o FILE@] Specifies the output file. If this option is
 -- not given, output will be written to 'IO.stdout'.
 --
@@ -131,34 +131,35 @@ import qualified Unsafe.Coerce as Unsafe
 -- @--output OUTPUT@ to @< INPUT@ and @> OUTPUT@ respectively. Windows attempts
 -- to encode pipes as UTF-16, which can give unexpected results.
 --
--- Decode a binary replay file and output a JSON replay file. This is by far
--- the most common way to use Endo.
+-- -   Decode a binary replay file and output a JSON replay file. This is by
+--     far the most common way to use Endo.
 --
--- > $ endo < example.replay > example.json
--- > $ endo -i example.replay -o example.json
--- > $ endo --mode decode --input example.replay --output example.json
+--     > $ endo < example.replay > example.json
+--     > $ endo -i example.replay -o example.json
+--     > $ endo --mode decode --input example.replay --output example.json
 --
--- Decode a binary replay file and output JSON replay to 'IO.stdout'. Note that
--- in the first example @--mode@ is optional because the default mode is
--- @decode@.
+-- -   Decode a binary replay file and output JSON replay to 'IO.stdout'. Note
+--     that in the first example @--mode@ is optional because the default mode
+--     is @decode@.
 --
--- > $ endo < example.replay
--- > $ endo -i example.replay
--- > $ endo --mode decode --input example.replay
+--     > $ endo < example.replay
+--     > $ endo -i example.replay
+--     > $ endo --mode decode --input example.replay
 --
--- Encode a JSON replay file and output a binary replay file.
+-- -   Encode a JSON replay file and output a binary replay file.
 --
--- > $ endo -m encode < example.json > example.replay
--- > $ endo -i example.json -o example.replay
--- > $ endo --mode encode --input example.json --output example.replay
+--     > $ endo -m encode < example.json > example.replay
+--     > $ endo -i example.json -o example.replay
+--     > $ endo --mode encode --input example.json --output example.replay
 --
--- Encode a JSON replay file and output a binary replay to 'IO.stdout'. Note
--- that in the first example @--mode@ is required, otherwise it would default
--- to @decode@. Endo does not know the name of the file piped to 'IO.stdin'.
+-- -   Encode a JSON replay file and output a binary replay to 'IO.stdout'.
+--     Note that in the first example @--mode@ is required, otherwise it would
+--     default to @decode@. Endo does not know the name of the file piped to
+--     'IO.stdin'.
 --
--- > $ endo -m encode < example.json
--- > $ endo -i example.json
--- > $ endo --mode encode --input example.json
+--     > $ endo -m encode < example.json
+--     > $ endo -i example.json
+--     > $ endo --mode encode --input example.json
 main :: IO ()
 main = do
   name <- Environment.getProgName
@@ -242,7 +243,8 @@ replayToJson_ replay =
 
 
 -- | A high-level section of a replay. Rocket League replays are split up into
--- two sections, each with a size and CRC.
+-- two sections, each with a size and CRC. This type handles all of that for
+-- you, so you shouldn't need to think about it.
 newtype Section a
   = Section a
 
@@ -306,29 +308,37 @@ data Header = Header
   -- [@\"MapName\"@] This is a 'PropertyName' with a case-insensitive map
   -- identifier, like @\"Stadium_P\"@.
   --
-  -- There are many other properties that affect how the replay looks in the
-  -- list of replays.
+  -- There are many other optional properties that affect how the replay looks
+  -- in the list of replays:
   --
   -- [@\"Date\"@] A 'PropertyStr' with the format @"YYYY-mm-dd:HH-MM"@. Dates
   -- are not validated, but the month must be between 1 and 12 to show up. The
   -- hour is shown modulo 12 with AM or PM.
+  --
   -- [@\"MatchType\"@] A 'PropertyName'. If this is not one of the expected
   -- values, nothing will be shown next to the replay's map. The expected
   -- values are: @\"Online\"@, @\"Offline\"@, @\"Private\"@, and @\"Season\"@.
+  --
   -- [@\"NumFrames\"@] This 'PropertyInt' is used to calculate the length of
   -- the match. There are 30 frames per second, a typical 5-minute match has
   -- about 9,000 frames.
+  --
   -- [@\"PrimaryPlayerTeam\"@] This is an 'PropertyInt'. It is either 0 (blue)
   -- or 1 (orange). Any other value is ignored. If this would be 0, you don't
   -- have to set it at all.
+  --
   -- [@\"ReplayName\"@] An optional 'PropertyStr' with a user-supplied name for
   -- the replay.
+  --
   -- [@\"Team0Score\"@] The blue team's score as an 'PropertyInt'. Can be
   -- omitted if the score is 0.
+  --
   -- [@\"Team1Score\"@] The orange team's score as an 'PropertyInt'. Can also
   -- be omitted if the score is 0.
+  --
   -- [@\"TeamSize\"@] An 'PropertyInt' with the number of players per team.
   -- This value is not validated, so you can put absurd values like 99.
+  --
   -- [@\"bUnfairBots\"@] A 'PropertyBool' that makes "unfair" team sizes like
   -- 1v2.
   }
@@ -597,6 +607,9 @@ textToJson :: Text.Text -> Aeson.Encoding
 textToJson = Aeson.toEncoding
 
 
+-- | This is a placeholder data type that will eventually go away. It's used
+-- for the fields that Endo doesn't know how to handle yet. That way they can
+-- still be round-tripped through JSON.
 newtype Base64
   = Base64 Bytes.ByteString
 
