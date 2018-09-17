@@ -486,6 +486,8 @@ data Content = Content
   , contentNames :: Vector.Vector Text.Text
   -- ^ It's not clear what these are used for. This list is usually not empty,
   -- but appears unused otherwise.
+  , contentClassMappings :: Vector.Vector ClassMapping
+  -- ^ A mapping between classes and their ID in the stream.
   , contentRest :: Base64
   }
 
@@ -500,6 +502,7 @@ bytesToContent =
     <*> bytesToVector bytesToText
     <*> bytesToVector bytesToText
     <*> bytesToVector bytesToText
+    <*> bytesToVector bytesToClassMapping
     <*> bytesToBase64
 
 contentToBytes :: Content -> Binary.Put
@@ -512,6 +515,7 @@ contentToBytes content =
     <> vectorToBytes textToBytes (contentPackages content)
     <> vectorToBytes textToBytes (contentObjects content)
     <> vectorToBytes textToBytes (contentNames content)
+    <> vectorToBytes classMappingToBytes (contentClassMappings content)
     <> base64ToBytes (contentRest content)
 
 jsonToContent :: Aeson.Value -> Aeson.Parser Content
@@ -525,6 +529,7 @@ jsonToContent = Aeson.withObject "Content" $ \object ->
     <*> requiredKey (jsonToVector jsonToText) object "packages"
     <*> requiredKey (jsonToVector jsonToText) object "objects"
     <*> requiredKey (jsonToVector jsonToText) object "names"
+    <*> requiredKey (jsonToVector jsonToClassMapping) object "classMappings"
     <*> requiredKey jsonToBase64 object "rest"
 
 contentToJson :: Content -> Aeson.Encoding
@@ -541,6 +546,10 @@ contentToJson content =
     <> toPair (vectorToJson textToJson) "packages" (contentPackages content)
     <> toPair (vectorToJson textToJson) "objects" (contentObjects content)
     <> toPair (vectorToJson textToJson) "names" (contentNames content)
+    <> toPair
+         (vectorToJson classMappingToJson)
+         "classMappings"
+         (contentClassMappings content)
     <> toPair base64ToJson "rest" (contentRest content)
 
 
@@ -676,6 +685,32 @@ markToJson mark =
     word32ToJson
     "frame"
     (markFrame mark)
+
+
+data ClassMapping = ClassMapping
+  { classMappingName :: Text.Text
+  , classMappingStreamId :: Word.Word32
+  }
+
+bytesToClassMapping :: Binary.Get ClassMapping
+bytesToClassMapping = ClassMapping <$> bytesToText <*> bytesToWord32
+
+classMappingToBytes :: ClassMapping -> Binary.Put
+classMappingToBytes classMapping = textToBytes (classMappingName classMapping)
+  <> word32ToBytes (classMappingStreamId classMapping)
+
+jsonToClassMapping :: Aeson.Value -> Aeson.Parser ClassMapping
+jsonToClassMapping = Aeson.withObject "ClassMapping" $ \object ->
+  ClassMapping <$> requiredKey jsonToText object "name" <*> requiredKey
+    jsonToWord32
+    object
+    "streamId"
+
+classMappingToJson :: ClassMapping -> Aeson.Encoding
+classMappingToJson classMapping =
+  Aeson.pairs
+    $ toPair textToJson "name" (classMappingName classMapping)
+    <> toPair word32ToJson "streamId" (classMappingStreamId classMapping)
 
 
 bytesToFloat :: Binary.Get Float
