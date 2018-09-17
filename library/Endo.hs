@@ -26,6 +26,7 @@ module Endo
   , Header(..)
   , Property(..)
   , Content(..)
+  , KeyFrame(..)
   , Base64(..)
   )
 where
@@ -462,27 +463,79 @@ data Content = Content
   { contentLevels :: Vector.Vector Text.Text
   -- ^ It's not entirely clear what this represents. Typically there is only
   -- one level, like @"stadium_oob_audio_map"@.
+  , contentKeyFrames :: Vector.Vector KeyFrame
+  -- ^ A list of which frames are key frames. Although they aren't necessary
+  -- for replays, key frames are frames that replicate every actor. They
+  -- typically happen once every 10 seconds.
   , contentRest :: Base64
   }
 
 bytesToContent :: Binary.Get Content
-bytesToContent = Content <$> bytesToVector bytesToText <*> bytesToBase64
+bytesToContent =
+  Content
+    <$> bytesToVector bytesToText
+    <*> bytesToVector bytesToKeyFrame
+    <*> bytesToBase64
 
 contentToBytes :: Content -> Binary.Put
-contentToBytes content = vectorToBytes textToBytes (contentLevels content)
-  <> base64ToBytes (contentRest content)
+contentToBytes content =
+  vectorToBytes textToBytes (contentLevels content)
+    <> vectorToBytes keyFrameToBytes (contentKeyFrames content)
+    <> base64ToBytes (contentRest content)
 
 jsonToContent :: Aeson.Value -> Aeson.Parser Content
 jsonToContent = Aeson.withObject "Content" $ \object ->
   Content
     <$> requiredKey (jsonToVector jsonToText) object "levels"
+    <*> requiredKey (jsonToVector jsonToKeyFrame) object "keyFrames"
     <*> requiredKey jsonToBase64 object "rest"
 
 contentToJson :: Content -> Aeson.Encoding
 contentToJson content =
   Aeson.pairs
     $ toPair (vectorToJson textToJson) "levels" (contentLevels content)
+    <> toPair
+         (vectorToJson keyFrameToJson)
+         "keyFrames"
+         (contentKeyFrames content)
     <> toPair base64ToJson "rest" (contentRest content)
+
+
+-- | Meta information about a frame that replicates every actor. Key frames are
+-- useful for quickly scrubbing through replays.
+data KeyFrame = KeyFrame
+  { keyFrameTime :: Float
+  -- ^ The number of seconds since the beginning on the replay.
+  , keyFrameFrame :: Word.Word32
+  -- ^ The frame number of this key frame, starting from 0 at the beginning of
+  -- the replay.
+  , keyFramePosition :: Word.Word32
+  -- ^ The bit position of this key frame in the network stream.
+  }
+
+bytesToKeyFrame :: Binary.Get KeyFrame
+bytesToKeyFrame =
+  KeyFrame <$> bytesToFloat <*> bytesToWord32 <*> bytesToWord32
+
+keyFrameToBytes :: KeyFrame -> Binary.Put
+keyFrameToBytes keyFrame =
+  floatToBytes (keyFrameTime keyFrame)
+    <> word32ToBytes (keyFrameFrame keyFrame)
+    <> word32ToBytes (keyFramePosition keyFrame)
+
+jsonToKeyFrame :: Aeson.Value -> Aeson.Parser KeyFrame
+jsonToKeyFrame = Aeson.withObject "KeyFrame" $ \object ->
+  KeyFrame
+    <$> requiredKey jsonToFloat object "time"
+    <*> requiredKey jsonToWord32 object "frame"
+    <*> requiredKey jsonToWord32 object "position"
+
+keyFrameToJson :: KeyFrame -> Aeson.Encoding
+keyFrameToJson keyFrame =
+  Aeson.pairs
+    $ toPair floatToJson "time" (keyFrameTime keyFrame)
+    <> toPair word32ToJson "frame" (keyFrameFrame keyFrame)
+    <> toPair word32ToJson "position" (keyFramePosition keyFrame)
 
 
 bytesToFloat :: Binary.Get Float
