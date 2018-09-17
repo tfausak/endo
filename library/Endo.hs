@@ -189,7 +189,7 @@ mainWith name arguments = do
 -- give you back what you started with (unlike 'replayFromJson'). The result
 -- should be effectively the same, but the actual bytes might differ slightly.
 replayFromBinary :: Bytes.ByteString -> Either String Replay
-replayFromBinary = runGet decodeReplay
+replayFromBinary = runGet bytesToReplay
 
 -- | Encodes a JSON replay. This is the opposite of 'replayFromJson'.
 replayToJson :: Replay -> Bytes.ByteString
@@ -206,7 +206,7 @@ replayFromJson bytes = do
 
 -- | Encodes a binary replay. This is the opposite of 'replayFromBinary'.
 replayToBinary :: Replay -> Bytes.ByteString
-replayToBinary = runPut encodeReplay
+replayToBinary = runPut replayToBytes
 
 
 -- | A Rocket League replay. Most of the information you'll usually want, like
@@ -218,14 +218,14 @@ data Replay = Replay
   , replayContent :: Section Content
   }
 
-decodeReplay :: Binary.Get Replay
-decodeReplay =
-  Replay <$> decodeSection decodeHeader <*> decodeSection bytesToContent
+bytesToReplay :: Binary.Get Replay
+bytesToReplay =
+  Replay <$> bytesToSection bytesToHeader <*> bytesToSection bytesToContent
 
-encodeReplay :: Replay -> Binary.Put
-encodeReplay replay =
-  encodeSection encodeHeader (replayHeader replay)
-    <> encodeSection contentToBytes (replayContent replay)
+replayToBytes :: Replay -> Binary.Put
+replayToBytes replay =
+  sectionToBytes headerToBytes (replayHeader replay)
+    <> sectionToBytes contentToBytes (replayContent replay)
 
 jsonToReplay :: Aeson.Value -> Aeson.Parser Replay
 jsonToReplay = Aeson.withObject "Replay" $ \object ->
@@ -252,8 +252,8 @@ toSection = Section
 fromSection :: Section a -> a
 fromSection (Section a) = a
 
-decodeSection :: Binary.Get a -> Binary.Get (Section a)
-decodeSection decode = do
+bytesToSection :: Binary.Get a -> Binary.Get (Section a)
+bytesToSection decode = do
   size <- bytesToWord32
   expectedCrc <- bytesToWord32
   bytes <- Binary.getByteString $ word32ToInt size
@@ -266,8 +266,8 @@ decodeSection decode = do
     <> show expectedCrc
   toSection <$> either fail pure (runGet decode bytes)
 
-encodeSection :: (a -> Binary.Put) -> Section a -> Binary.Put
-encodeSection encode section =
+sectionToBytes :: (a -> Binary.Put) -> Section a -> Binary.Put
+sectionToBytes encode section =
   let bytes = runPut encode $ fromSection section
   in
     word32ToBytes (intToWord32 $ Bytes.length bytes)
@@ -341,8 +341,8 @@ data Header = Header
   -- 1v2.
   }
 
-decodeHeader :: Binary.Get Header
-decodeHeader = do
+bytesToHeader :: Binary.Get Header
+bytesToHeader = do
   majorVersion <- bytesToWord32
   minorVersion <- bytesToWord32
   Header majorVersion minorVersion
@@ -350,8 +350,8 @@ decodeHeader = do
     <*> bytesToText
     <*> bytesToHashMap bytesToProperty
 
-encodeHeader :: Header -> Binary.Put
-encodeHeader header =
+headerToBytes :: Header -> Binary.Put
+headerToBytes header =
   word32ToBytes (headerMajorVersion header)
     <> word32ToBytes (headerMinorVersion header)
     <> maybeToBytes word32ToBytes (headerPatchVersion header)
