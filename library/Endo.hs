@@ -478,6 +478,9 @@ data Content = Content
   -- ^ Debug messages. These only exist in very old replays.
   , contentMarks :: Vector.Vector Mark
   -- ^ Ticks marks shown on the scrubber when watching a replay.
+  , contentPackages :: Vector.Vector Text.Text
+  -- ^ A list of @.upk@ files to load, like
+  -- @"..\..\TAGame\CookedPCConsole\Stadium_P.upk"@.
   , contentRest :: Base64
   }
 
@@ -489,6 +492,7 @@ bytesToContent =
     <*> bytesToFrames
     <*> bytesToVector bytesToMessage
     <*> bytesToVector bytesToMark
+    <*> bytesToVector bytesToText
     <*> bytesToBase64
 
 contentToBytes :: Content -> Binary.Put
@@ -498,6 +502,7 @@ contentToBytes content =
     <> framesToBytes (contentFrames content)
     <> vectorToBytes messageToBytes (contentMessages content)
     <> vectorToBytes markToBytes (contentMarks content)
+    <> vectorToBytes textToBytes (contentPackages content)
     <> base64ToBytes (contentRest content)
 
 jsonToContent :: Aeson.Value -> Aeson.Parser Content
@@ -508,6 +513,7 @@ jsonToContent = Aeson.withObject "Content" $ \object ->
     <*> requiredKey jsonToFrames object "frames"
     <*> requiredKey (jsonToVector jsonToMessage) object "messages"
     <*> requiredKey (jsonToVector jsonToMark) object "marks"
+    <*> requiredKey (jsonToVector jsonToText) object "packages"
     <*> requiredKey jsonToBase64 object "rest"
 
 contentToJson :: Content -> Aeson.Encoding
@@ -521,6 +527,7 @@ contentToJson content =
     <> toPair framesToJson "frames" (contentFrames content)
     <> toPair (vectorToJson messageToJson) "messages" (contentMessages content)
     <> toPair (vectorToJson markToJson) "marks" (contentMarks content)
+    <> toPair (vectorToJson textToJson) "packages" (contentPackages content)
     <> toPair base64ToJson "rest" (contentRest content)
 
 
