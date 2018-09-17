@@ -29,6 +29,7 @@ module Endo
   , KeyFrame(..)
   , Frames(..)
   , Message(..)
+  , Mark(..)
   , Base64(..)
   )
 where
@@ -475,6 +476,8 @@ data Content = Content
   -- in here.
   , contentMessages :: Vector.Vector Message
   -- ^ Debug messages. These only exist in very old replays.
+  , contentMarks :: Vector.Vector Mark
+  -- ^ Ticks marks shown on the scrubber when watching a replay.
   , contentRest :: Base64
   }
 
@@ -485,6 +488,7 @@ bytesToContent =
     <*> bytesToVector bytesToKeyFrame
     <*> bytesToFrames
     <*> bytesToVector bytesToMessage
+    <*> bytesToVector bytesToMark
     <*> bytesToBase64
 
 contentToBytes :: Content -> Binary.Put
@@ -493,6 +497,7 @@ contentToBytes content =
     <> vectorToBytes keyFrameToBytes (contentKeyFrames content)
     <> framesToBytes (contentFrames content)
     <> vectorToBytes messageToBytes (contentMessages content)
+    <> vectorToBytes markToBytes (contentMarks content)
     <> base64ToBytes (contentRest content)
 
 jsonToContent :: Aeson.Value -> Aeson.Parser Content
@@ -502,6 +507,7 @@ jsonToContent = Aeson.withObject "Content" $ \object ->
     <*> requiredKey (jsonToVector jsonToKeyFrame) object "keyFrames"
     <*> requiredKey jsonToFrames object "frames"
     <*> requiredKey (jsonToVector jsonToMessage) object "messages"
+    <*> requiredKey (jsonToVector jsonToMark) object "marks"
     <*> requiredKey jsonToBase64 object "rest"
 
 contentToJson :: Content -> Aeson.Encoding
@@ -514,6 +520,7 @@ contentToJson content =
          (contentKeyFrames content)
     <> toPair framesToJson "frames" (contentFrames content)
     <> toPair (vectorToJson messageToJson) "messages" (contentMessages content)
+    <> toPair (vectorToJson markToJson) "marks" (contentMarks content)
     <> toPair base64ToJson "rest" (contentRest content)
 
 
@@ -619,6 +626,36 @@ messageToJson message =
     $ toPair word32ToJson "frame" (messageFrame message)
     <> toPair textToJson "name" (messageName message)
     <> toPair textToJson "value" (messageValue message)
+
+
+-- | A tick mark on the replay scrubber.
+data Mark = Mark
+  { markValue :: Text.Text
+  -- ^ Which type of mark this is, like @\"Team0Goal\"@.
+  , markFrame :: Word.Word32
+  -- ^ Which frame this mark belongs to, starting from 0.
+  }
+
+bytesToMark :: Binary.Get Mark
+bytesToMark = Mark <$> bytesToText <*> bytesToWord32
+
+markToBytes :: Mark -> Binary.Put
+markToBytes mark =
+  textToBytes (markValue mark) <> word32ToBytes (markFrame mark)
+
+jsonToMark :: Aeson.Value -> Aeson.Parser Mark
+jsonToMark = Aeson.withObject "Mark" $ \object ->
+  Mark <$> requiredKey jsonToText object "value" <*> requiredKey
+    jsonToWord32
+    object
+    "frame"
+
+markToJson :: Mark -> Aeson.Encoding
+markToJson mark =
+  Aeson.pairs $ toPair textToJson "value" (markValue mark) <> toPair
+    word32ToJson
+    "frame"
+    (markFrame mark)
 
 
 bytesToFloat :: Binary.Get Float
