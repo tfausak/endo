@@ -30,7 +30,9 @@ module Endo
   , Frames(..)
   , Message(..)
   , Mark(..)
-  , Base64(..)
+  , ClassMapping(..)
+  , Cache(..)
+  , AttributeMapping(..)
   )
 where
 
@@ -488,7 +490,8 @@ data Content = Content
   -- but appears unused otherwise.
   , contentClassMappings :: Vector.Vector ClassMapping
   -- ^ A mapping between classes and their ID in the stream.
-  , contentRest :: Base64
+  , contentCaches :: Vector.Vector Cache
+  -- ^ A list of classes along with their parent classes and attributes.
   }
 
 bytesToContent :: Binary.Get Content
@@ -503,7 +506,7 @@ bytesToContent =
     <*> bytesToVector bytesToText
     <*> bytesToVector bytesToText
     <*> bytesToVector bytesToClassMapping
-    <*> bytesToBase64
+    <*> bytesToVector bytesToCache
 
 contentToBytes :: Content -> Binary.Put
 contentToBytes content =
@@ -516,7 +519,7 @@ contentToBytes content =
     <> vectorToBytes textToBytes (contentObjects content)
     <> vectorToBytes textToBytes (contentNames content)
     <> vectorToBytes classMappingToBytes (contentClassMappings content)
-    <> base64ToBytes (contentRest content)
+    <> vectorToBytes cacheToBytes (contentCaches content)
 
 jsonToContent :: Aeson.Value -> Aeson.Parser Content
 jsonToContent = Aeson.withObject "Content" $ \object ->
@@ -530,7 +533,7 @@ jsonToContent = Aeson.withObject "Content" $ \object ->
     <*> requiredKey (jsonToVector jsonToText) object "objects"
     <*> requiredKey (jsonToVector jsonToText) object "names"
     <*> requiredKey (jsonToVector jsonToClassMapping) object "classMappings"
-    <*> requiredKey jsonToBase64 object "rest"
+    <*> requiredKey (jsonToVector jsonToCache) object "caches"
 
 contentToJson :: Content -> Aeson.Encoding
 contentToJson content =
@@ -550,7 +553,7 @@ contentToJson content =
          (vectorToJson classMappingToJson)
          "classMappings"
          (contentClassMappings content)
-    <> toPair base64ToJson "rest" (contentRest content)
+    <> toPair (vectorToJson cacheToJson) "caches" (contentCaches content)
 
 
 -- | Meta information about a frame that replicates every actor. Key frames are
@@ -713,6 +716,83 @@ classMappingToJson classMapping =
     <> toPair word32ToJson "streamId" (classMappingStreamId classMapping)
 
 
+data Cache = Cache
+  { cacheClassId :: Word.Word32
+  , cacheParentCacheId :: Word.Word32
+  , cacheCacheId :: Word.Word32
+  , cacheAttributeMappings :: Vector.Vector AttributeMapping
+  }
+
+bytesToCache :: Binary.Get Cache
+bytesToCache =
+  Cache
+    <$> bytesToWord32
+    <*> bytesToWord32
+    <*> bytesToWord32
+    <*> bytesToVector bytesToAttributeMapping
+
+cacheToBytes :: Cache -> Binary.Put
+cacheToBytes cache =
+  word32ToBytes (cacheClassId cache)
+    <> word32ToBytes (cacheParentCacheId cache)
+    <> word32ToBytes (cacheCacheId cache)
+    <> vectorToBytes attributeMappingToBytes (cacheAttributeMappings cache)
+
+jsonToCache :: Aeson.Value -> Aeson.Parser Cache
+jsonToCache = Aeson.withObject "Cache" $ \object ->
+  Cache
+    <$> requiredKey jsonToWord32 object "classId"
+    <*> requiredKey jsonToWord32 object "parentCacheId"
+    <*> requiredKey jsonToWord32 object "cacheId"
+    <*> requiredKey
+          (jsonToVector jsonToAttributeMapping)
+          object
+          "attributeMappings"
+
+cacheToJson :: Cache -> Aeson.Encoding
+cacheToJson cache =
+  Aeson.pairs
+    $ toPair word32ToJson "classId" (cacheClassId cache)
+    <> toPair word32ToJson "parentCacheId" (cacheParentCacheId cache)
+    <> toPair word32ToJson "cacheId" (cacheCacheId cache)
+    <> toPair
+         (vectorToJson attributeMappingToJson)
+         "attributeMappings"
+         (cacheAttributeMappings cache)
+
+
+data AttributeMapping = AttributeMapping
+  { attributeMappingObjectId :: Word.Word32
+  , attributeMappingStreamId :: Word.Word32
+  }
+
+bytesToAttributeMapping :: Binary.Get AttributeMapping
+bytesToAttributeMapping = AttributeMapping <$> bytesToWord32 <*> bytesToWord32
+
+attributeMappingToBytes :: AttributeMapping -> Binary.Put
+attributeMappingToBytes attributeMapping =
+  word32ToBytes (attributeMappingObjectId attributeMapping)
+    <> word32ToBytes (attributeMappingStreamId attributeMapping)
+
+jsonToAttributeMapping :: Aeson.Value -> Aeson.Parser AttributeMapping
+jsonToAttributeMapping = Aeson.withObject "AttributeMapping" $ \object ->
+  AttributeMapping
+    <$> requiredKey jsonToWord32 object "objectId"
+    <*> requiredKey jsonToWord32 object "streamId"
+
+attributeMappingToJson :: AttributeMapping -> Aeson.Encoding
+attributeMappingToJson attributeMapping =
+  Aeson.pairs
+    $ toPair
+        word32ToJson
+        "objectId"
+        (attributeMappingObjectId attributeMapping)
+    <> toPair
+         word32ToJson
+         "streamId"
+         (attributeMappingStreamId attributeMapping)
+
+
 bytesToFloat :: Binary.Get Float
 bytesToFloat = word32ToFloat <$> bytesToWord32
 
@@ -852,36 +932,6 @@ jsonToVector = Aeson.withArray "Vector" . mapM
 
 vectorToJson :: (a -> Aeson.Encoding) -> Vector.Vector a -> Aeson.Encoding
 vectorToJson encode = Aeson.list encode . Vector.toList
-
-
--- | This is a placeholder data type that will eventually go away. It's used
--- for the fields that Endo doesn't know how to handle yet. That way they can
--- still be round-tripped through JSON.
-newtype Base64
-  = Base64 Bytes.ByteString
-
-toBase64 :: Bytes.ByteString -> Base64
-toBase64 = Base64
-
-fromBase64 :: Base64 -> Bytes.ByteString
-fromBase64 (Base64 bytes) = bytes
-
-bytesToBase64 :: Binary.Get Base64
-bytesToBase64 =
-  toBase64 . LazyBytes.toStrict <$> Binary.getRemainingLazyByteString
-
-base64ToBytes :: Base64 -> Binary.Put
-base64ToBytes = Binary.putByteString . fromBase64
-
-jsonToBase64 :: Aeson.Value -> Aeson.Parser Base64
-jsonToBase64 =
-  Aeson.withText "Base64"
-    $ either fail (pure . toBase64)
-    . Base64.decode
-    . Text.encodeUtf8
-
-base64ToJson :: Base64 -> Aeson.Encoding
-base64ToJson = Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . fromBase64
 
 
 getInput :: Maybe FilePath -> IO Bytes.ByteString
