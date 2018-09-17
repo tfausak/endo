@@ -527,11 +527,7 @@ jsonToHashMap = Aeson.withObject "HashMap" . mapM
 
 hashMapToJson
   :: (v -> Aeson.Encoding) -> HashMap.HashMap Text.Text v -> Aeson.Encoding
-hashMapToJson encode =
-  Aeson.pairs
-    . HashMap.foldrWithKey
-        (\key value series -> toPair encode key value <> series)
-        mempty
+hashMapToJson encode = Aeson.dict Aeson.text encode HashMap.foldrWithKey
 
 
 bytesToInt32 :: Binary.Get Int.Int32
