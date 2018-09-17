@@ -38,6 +38,7 @@
   - { name: System.IO, as: IO }
   - { name: System.IO.Temp, as: Temp }
   - { name: System.Mem, as: Mem }
+  - { name: Text.Printf, as: Printf }
   - { name: Unsafe.Coerce, as: Unsafe }
 - functions:
   - default: true
