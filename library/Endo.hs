@@ -968,7 +968,7 @@ bytesToText :: Binary.Get Text.Text
 bytesToText = do
   size <- bytesToInt32
   Text.filter (/= '\x00') <$> if size < 0
-    then fail "TODO: get utf 16"
+    then Text.decodeUtf16LE <$> Binary.getByteString (-2 * int32ToInt size)
     else Text.decodeLatin1 <$> Binary.getByteString (int32ToInt size)
 
 textToBytes :: Text.Text -> Binary.Put
@@ -981,7 +981,12 @@ textToBytes text
           in
             int32ToBytes (intToInt32 $ Bytes.length bytes)
               <> Binary.putByteString bytes
-        else fail "TODO: put utf 16"
+        else
+          let bytes = Text.encodeUtf16LE textWithNull
+          in
+            int32ToBytes
+                (flip div 2 . negate . intToInt32 $ Bytes.length bytes)
+              <> Binary.putByteString bytes
 
 jsonToText :: Aeson.Value -> Aeson.Parser Text.Text
 jsonToText = Aeson.parseJSON
