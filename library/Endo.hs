@@ -44,6 +44,7 @@ import qualified Data.Binary as Binary
 import qualified Data.Binary.Get as Binary
 import qualified Data.Binary.Put as Binary
 import qualified Data.Bits as Bits
+import qualified Data.Bool as Bool
 import qualified Data.ByteString as Bytes
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Char8 as Latin1
@@ -396,17 +397,30 @@ hasPatchVersion majorVersion minorVersion =
 -- | Properties are given in the header and usually describe high-level game
 -- information like the player names and the information on their scoreboards.
 data Property
-  = PropertyFloat Float
+  = PropertyArray (Vector.Vector (HashMap.HashMap Text.Text Property))
+  | PropertyBool Bool
+  | PropertyByte Text.Text Text.Text
+  | PropertyFloat Float
   | PropertyInt Int.Int32
   | PropertyName Text.Text
   -- ^ Names are like strings except that they show up in the list of names in
   -- the content. It's not clear what this means exactly.
+  | PropertyQWord Word.Word64
   | PropertyStr Text.Text
 
 bytesToProperty :: Binary.Get Property
 bytesToProperty = do
   kind <- bytesToText
   case kind of
+    "ArrayProperty" -> do
+      _size <- bytesToWord64 -- TODO
+      PropertyArray <$> bytesToVector (bytesToHashMap bytesToProperty)
+    "BoolProperty" -> do
+      0 <- bytesToWord64
+      PropertyBool <$> bytesToBool
+    "ByteProperty" -> do
+      _size <- bytesToWord64 -- TODO
+      PropertyByte <$> bytesToText <*> bytesToText
     "FloatProperty" -> do
       4 <- bytesToWord64
       PropertyFloat <$> bytesToFloat
@@ -416,6 +430,9 @@ bytesToProperty = do
     "NameProperty" -> do
       size <- bytesToWord64
       PropertyName <$> Binary.isolate (word64ToInt size) bytesToText
+    "QWordProperty" -> do
+      8 <- bytesToWord64
+      PropertyQWord <$> bytesToWord64
     "StrProperty" -> do
       size <- bytesToWord64
       PropertyStr <$> Binary.isolate (word64ToInt size) bytesToText
@@ -423,6 +440,17 @@ bytesToProperty = do
 
 propertyToBytes :: Property -> Binary.Put
 propertyToBytes property = case property of
+  PropertyArray vector ->
+    textToBytes "ArrayProperty"
+      <> word64ToBytes 0 -- TODO
+      <> vectorToBytes (hashMapToBytes propertyToBytes) vector
+  PropertyBool bool ->
+    textToBytes "BoolProperty" <> word64ToBytes 0 <> boolToBytes bool
+  PropertyByte key value ->
+    textToBytes "ByteProperty"
+      <> word64ToBytes 0 -- TODO
+      <> textToBytes key
+      <> textToBytes value
   PropertyFloat float ->
     textToBytes "FloatProperty" <> word64ToBytes 4 <> floatToBytes float
   PropertyInt int32 ->
@@ -433,6 +461,8 @@ propertyToBytes property = case property of
       textToBytes "NameProperty"
       <> word64ToBytes (intToWord64 $ Bytes.length bytes)
       <> Binary.putByteString bytes
+  PropertyQWord word64 ->
+    textToBytes "QWordProperty" <> word64ToBytes 8 <> word64ToBytes word64
   PropertyStr text ->
     let bytes = runPut textToBytes text
     in
@@ -444,20 +474,42 @@ jsonToProperty :: Aeson.Value -> Aeson.Parser Property
 jsonToProperty = Aeson.withObject "Property" $ \object -> do
   kind <- requiredKey jsonToText object "kind"
   case kind of
+    "array" -> PropertyArray <$> requiredKey
+      (jsonToVector $ jsonToHashMap jsonToProperty)
+      object
+      "value"
+    "bool" -> PropertyBool <$> requiredKey jsonToBool object "value"
+    "byte" ->
+      PropertyByte <$> requiredKey jsonToText object "key" <*> requiredKey
+        jsonToText
+        object
+        "value"
     "float" -> PropertyFloat <$> requiredKey jsonToFloat object "value"
     "int" -> PropertyInt <$> requiredKey jsonToInt32 object "value"
     "name" -> PropertyName <$> requiredKey jsonToText object "value"
+    "qWord" -> PropertyQWord <$> requiredKey jsonToWord64 object "value"
     "str" -> PropertyStr <$> requiredKey jsonToText object "value"
     _ -> fail $ "unknown property kind: " <> show kind
 
 propertyToJson :: Property -> Aeson.Encoding
 propertyToJson property = Aeson.pairs $ case property of
+  PropertyArray vector ->
+    toPair textToJson "kind" "array"
+      <> toPair (vectorToJson $ hashMapToJson propertyToJson) "value" vector
+  PropertyBool bool ->
+    toPair textToJson "kind" "bool" <> toPair boolToJson "value" bool
+  PropertyByte key value ->
+    toPair textToJson "kind" "byte"
+      <> toPair textToJson "key" key
+      <> toPair textToJson "value" value
   PropertyFloat float ->
     toPair textToJson "kind" "float" <> toPair floatToJson "value" float
   PropertyInt int32 ->
     toPair textToJson "kind" "int" <> toPair int32ToJson "value" int32
   PropertyName text ->
     toPair textToJson "kind" "name" <> toPair textToJson "value" text
+  PropertyQWord word64 ->
+    toPair textToJson "kind" "qWord" <> toPair word64ToJson "value" word64
   PropertyStr text ->
     toPair textToJson "kind" "str" <> toPair textToJson "value" text
 
@@ -793,6 +845,24 @@ attributeMappingToJson attributeMapping =
          (attributeMappingStreamId attributeMapping)
 
 
+bytesToBool :: Binary.Get Bool
+bytesToBool = do
+  byte <- Binary.getWord8
+  case byte of
+    0 -> pure False
+    1 -> pure True
+    _ -> fail $ "invalid boolean: " <> show byte
+
+boolToBytes :: Bool -> Binary.Put
+boolToBytes = Binary.putWord8 . Bool.bool 0 1
+
+jsonToBool :: Aeson.Value -> Aeson.Parser Bool
+jsonToBool = Aeson.parseJSON
+
+boolToJson :: Bool -> Aeson.Encoding
+boolToJson = Aeson.toEncoding
+
+
 bytesToFloat :: Binary.Get Float
 bytesToFloat = word32ToFloat <$> bytesToWord32
 
@@ -886,6 +956,12 @@ bytesToWord64 = Binary.getWord64le
 
 word64ToBytes :: Word.Word64 -> Binary.Put
 word64ToBytes = Binary.putWord64le
+
+jsonToWord64 :: Aeson.Value -> Aeson.Parser Word.Word64
+jsonToWord64 = Aeson.parseJSON
+
+word64ToJson :: Word.Word64 -> Aeson.Encoding
+word64ToJson = Aeson.toEncoding
 
 
 bytesToText :: Binary.Get Text.Text
