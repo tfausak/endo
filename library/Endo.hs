@@ -481,6 +481,8 @@ data Content = Content
   , contentPackages :: Vector.Vector Text.Text
   -- ^ A list of @.upk@ files to load, like
   -- @"..\..\TAGame\CookedPCConsole\Stadium_P.upk"@.
+  , contentObjects :: Vector.Vector Text.Text
+  -- ^ Objects in the stream.
   , contentRest :: Base64
   }
 
@@ -493,6 +495,7 @@ bytesToContent =
     <*> bytesToVector bytesToMessage
     <*> bytesToVector bytesToMark
     <*> bytesToVector bytesToText
+    <*> bytesToVector bytesToText
     <*> bytesToBase64
 
 contentToBytes :: Content -> Binary.Put
@@ -503,6 +506,7 @@ contentToBytes content =
     <> vectorToBytes messageToBytes (contentMessages content)
     <> vectorToBytes markToBytes (contentMarks content)
     <> vectorToBytes textToBytes (contentPackages content)
+    <> vectorToBytes textToBytes (contentObjects content)
     <> base64ToBytes (contentRest content)
 
 jsonToContent :: Aeson.Value -> Aeson.Parser Content
@@ -514,6 +518,7 @@ jsonToContent = Aeson.withObject "Content" $ \object ->
     <*> requiredKey (jsonToVector jsonToMessage) object "messages"
     <*> requiredKey (jsonToVector jsonToMark) object "marks"
     <*> requiredKey (jsonToVector jsonToText) object "packages"
+    <*> requiredKey (jsonToVector jsonToText) object "objects"
     <*> requiredKey jsonToBase64 object "rest"
 
 contentToJson :: Content -> Aeson.Encoding
@@ -528,6 +533,7 @@ contentToJson content =
     <> toPair (vectorToJson messageToJson) "messages" (contentMessages content)
     <> toPair (vectorToJson markToJson) "marks" (contentMarks content)
     <> toPair (vectorToJson textToJson) "packages" (contentPackages content)
+    <> toPair (vectorToJson textToJson) "objects" (contentObjects content)
     <> toPair base64ToJson "rest" (contentRest content)
 
 
