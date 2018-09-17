@@ -3,12 +3,14 @@ module Main
   )
 where
 
+import qualified Control.Monad as Monad
 import qualified Data.ByteString as Bytes
 import qualified Data.Int as Int
 import qualified Endo
 import qualified System.Clock as Clock
 import qualified System.Exit as Exit
 import qualified System.FilePath as FilePath
+import qualified System.IO as IO
 import qualified System.IO.Temp as Temp
 import qualified System.Mem as Mem
 import qualified Text.Printf as Printf
@@ -101,53 +103,59 @@ main :: IO ()
 main = Temp.withSystemTempDirectory "endo-" mainWith
 
 mainWith :: FilePath -> IO ()
-mainWith directory = mapM_ (test directory) replays
+mainWith directory = do
+  IO.hPutStr IO.stderr $ unlines
+    [ "Columns:"
+    , "1.  Replay ID"
+    , "2.  Binary file size in bytes"
+    , "3.  Bytes allocated while decoding"
+    , "4.  #3 / #2: Decoding allocation related to binary file size"
+    , "5.  Nanoseconds elapsed while decoding"
+    , "6.  #2 / #5: Decoding rate in mebibytes per second"
+    , "7.  JSON file size in bytes"
+    , "8.  #7 / #2: JSON file size related to binary file size"
+    , "9.  Bytes allocated while encoding"
+    , "10. #9 / #2: Encoding allocation related to binary file size"
+    , "11. Nanoseconds elapsed while encoding"
+    , "12. #2 / #11: Encoding rate in mebibytes per second"
+    ]
+  mapM_ (test directory) replays
 
 test :: FilePath -> (String, String) -> IO ()
 test directory (name, description) = do
-  Printf.printf "- %s: %s\n" name description
-
   let
     originalReplayFile =
       FilePath.combine "replays" (FilePath.addExtension name "replay")
   originalReplay <- Bytes.readFile originalReplayFile
   let originalReplaySize = Bytes.length originalReplay
-  Printf.printf "  original size: %d bytes\n" originalReplaySize
-
   ((originalJsonFile, decodeCount), decodeTime) <- withTime
     (withAllocationCount (decode directory name originalReplayFile))
-  Printf.printf
-    "  decoding allocated: %d bytes (%dx)\n"
-    decodeCount
-    (div decodeCount (intToInt64 originalReplaySize))
-  Printf.printf
-    "  decoding elapsed: %d nanoseconds (%.3f MBps)\n"
-    (Clock.toNanoSecs decodeTime)
-    (mbps originalReplaySize decodeTime)
-
   originalJson <- Bytes.readFile originalJsonFile
   let originalJsonSize = Bytes.length originalJson
-  Printf.printf
-    "  JSON size: %d bytes (%.3fx)\n"
-    originalJsonSize
-    (fromIntegral originalJsonSize / fromIntegral originalReplaySize :: Float)
-
   ((modifiedReplayFile, encodeCount), encodeTime) <- withTime
     (withAllocationCount (encode directory name originalJsonFile))
-  Printf.printf
-    "  encoding allocated: %d bytes (%dx)\n"
-    encodeCount
-    (div encodeCount (intToInt64 originalReplaySize))
-  Printf.printf
-    "  encoding elapsed: %d nanoseconds (%.3f MBps)\n"
-    (Clock.toNanoSecs encodeTime)
-    (mbps originalReplaySize encodeTime)
-
   modifiedJsonFile <- decode directory name modifiedReplayFile
   modifiedJson <- Bytes.readFile modifiedJsonFile
-  if modifiedJson == originalJson
-    then putStrLn "  round tripping succeeded"
-    else Exit.die "  round tripping failed"
+
+  Monad.unless (modifiedJson == originalJson) . Exit.die $ Printf.printf
+    "%s: %s"
+    name
+    description
+
+  Printf.printf
+    "%4s\t%7d\t%8d\t%3d\t%8d\t%4.1f\t%7d\t%5.3f\t%8d\t%3d\t%8d\t%4.1f\n"
+    name
+    originalReplaySize
+    decodeCount
+    (div decodeCount (intToInt64 originalReplaySize))
+    (Clock.toNanoSecs decodeTime)
+    (mbps originalReplaySize decodeTime)
+    originalJsonSize
+    (fromIntegral originalJsonSize / fromIntegral originalReplaySize :: Float)
+    encodeCount
+    (div encodeCount (intToInt64 originalReplaySize))
+    (Clock.toNanoSecs encodeTime)
+    (mbps originalReplaySize encodeTime)
 
 mbps :: Int -> Clock.TimeSpec -> Double
 mbps bytes elapsed = bytesToMegabytes (intToDouble bytes)
