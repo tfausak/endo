@@ -467,6 +467,10 @@ data Content = Content
   -- ^ A list of which frames are key frames. Although they aren't necessary
   -- for replays, key frames are frames that replicate every actor. They
   -- typically happen once every 10 seconds.
+  , contentFrames :: Frames
+  -- ^ The actual game data. This is where all the interesting information is.
+  -- If you can see it by watching a replay in the Rocket League client, it's
+  -- in here.
   , contentRest :: Base64
   }
 
@@ -475,12 +479,14 @@ bytesToContent =
   Content
     <$> bytesToVector bytesToText
     <*> bytesToVector bytesToKeyFrame
+    <*> bytesToFrames
     <*> bytesToBase64
 
 contentToBytes :: Content -> Binary.Put
 contentToBytes content =
   vectorToBytes textToBytes (contentLevels content)
     <> vectorToBytes keyFrameToBytes (contentKeyFrames content)
+    <> framesToBytes (contentFrames content)
     <> base64ToBytes (contentRest content)
 
 jsonToContent :: Aeson.Value -> Aeson.Parser Content
@@ -488,6 +494,7 @@ jsonToContent = Aeson.withObject "Content" $ \object ->
   Content
     <$> requiredKey (jsonToVector jsonToText) object "levels"
     <*> requiredKey (jsonToVector jsonToKeyFrame) object "keyFrames"
+    <*> requiredKey jsonToFrames object "frames"
     <*> requiredKey jsonToBase64 object "rest"
 
 contentToJson :: Content -> Aeson.Encoding
@@ -498,6 +505,7 @@ contentToJson content =
          (vectorToJson keyFrameToJson)
          "keyFrames"
          (contentKeyFrames content)
+    <> toPair framesToJson "frames" (contentFrames content)
     <> toPair base64ToJson "rest" (contentRest content)
 
 
@@ -536,6 +544,39 @@ keyFrameToJson keyFrame =
     $ toPair floatToJson "time" (keyFrameTime keyFrame)
     <> toPair word32ToJson "frame" (keyFrameFrame keyFrame)
     <> toPair word32ToJson "position" (keyFramePosition keyFrame)
+
+
+-- | This is a placeholder until the frames can actually be handled.
+newtype Frames
+  = Frames Bytes.ByteString
+
+toFrames :: Bytes.ByteString -> Frames
+toFrames = Frames
+
+fromFrames :: Frames -> Bytes.ByteString
+fromFrames (Frames bytes) = bytes
+
+bytesToFrames :: Binary.Get Frames
+bytesToFrames = do
+  size <- bytesToWord32
+  toFrames <$> Binary.getByteString (word32ToInt size)
+
+framesToBytes :: Frames -> Binary.Put
+framesToBytes frames =
+  let bytes = fromFrames frames
+  in
+    word32ToBytes (intToWord32 $ Bytes.length bytes)
+      <> Binary.putByteString bytes
+
+jsonToFrames :: Aeson.Value -> Aeson.Parser Frames
+jsonToFrames =
+  Aeson.withText "Frames"
+    $ either fail (pure . toFrames)
+    . Base64.decode
+    . Text.encodeUtf8
+
+framesToJson :: Frames -> Aeson.Encoding
+framesToJson = Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . fromFrames
 
 
 bytesToFloat :: Binary.Get Float
