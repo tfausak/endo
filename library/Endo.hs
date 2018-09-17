@@ -420,7 +420,10 @@ bytesToProperty = do
       PropertyBool <$> bytesToBool
     "ByteProperty" -> do
       _size <- bytesToWord64 -- TODO
-      PropertyByte <$> bytesToText <*> bytesToText
+      key <- bytesToText
+      if key == "OnlinePlatform_Steam"
+        then pure $ PropertyByte "OnlinePlatform" key
+        else PropertyByte key <$> bytesToText
     "FloatProperty" -> do
       4 <- bytesToWord64
       PropertyFloat <$> bytesToFloat
@@ -966,7 +969,8 @@ word64ToJson = Aeson.toEncoding
 
 bytesToText :: Binary.Get Text.Text
 bytesToText = do
-  size <- bytesToInt32
+  rawSize <- bytesToInt32
+  let size = if rawSize == 0x05000000 then 8 else rawSize
   Text.filter (/= '\x00') <$> if size < 0
     then Text.decodeUtf16LE <$> Binary.getByteString (-2 * int32ToInt size)
     else Text.decodeLatin1 <$> Binary.getByteString (int32ToInt size)
