@@ -27,6 +27,8 @@ module Endo
   , Property(..)
   , Content(..)
   , KeyFrame(..)
+  , Frames(..)
+  , Message(..)
   , Base64(..)
   )
 where
@@ -471,6 +473,8 @@ data Content = Content
   -- ^ The actual game data. This is where all the interesting information is.
   -- If you can see it by watching a replay in the Rocket League client, it's
   -- in here.
+  , contentMessages :: Vector.Vector Message
+  -- ^ Debug messages. These only exist in very old replays.
   , contentRest :: Base64
   }
 
@@ -480,6 +484,7 @@ bytesToContent =
     <$> bytesToVector bytesToText
     <*> bytesToVector bytesToKeyFrame
     <*> bytesToFrames
+    <*> bytesToVector bytesToMessage
     <*> bytesToBase64
 
 contentToBytes :: Content -> Binary.Put
@@ -487,6 +492,7 @@ contentToBytes content =
   vectorToBytes textToBytes (contentLevels content)
     <> vectorToBytes keyFrameToBytes (contentKeyFrames content)
     <> framesToBytes (contentFrames content)
+    <> vectorToBytes messageToBytes (contentMessages content)
     <> base64ToBytes (contentRest content)
 
 jsonToContent :: Aeson.Value -> Aeson.Parser Content
@@ -495,6 +501,7 @@ jsonToContent = Aeson.withObject "Content" $ \object ->
     <$> requiredKey (jsonToVector jsonToText) object "levels"
     <*> requiredKey (jsonToVector jsonToKeyFrame) object "keyFrames"
     <*> requiredKey jsonToFrames object "frames"
+    <*> requiredKey (jsonToVector jsonToMessage) object "messages"
     <*> requiredKey jsonToBase64 object "rest"
 
 contentToJson :: Content -> Aeson.Encoding
@@ -506,6 +513,7 @@ contentToJson content =
          "keyFrames"
          (contentKeyFrames content)
     <> toPair framesToJson "frames" (contentFrames content)
+    <> toPair (vectorToJson messageToJson) "messages" (contentMessages content)
     <> toPair base64ToJson "rest" (contentRest content)
 
 
@@ -577,6 +585,40 @@ jsonToFrames =
 
 framesToJson :: Frames -> Aeson.Encoding
 framesToJson = Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . fromFrames
+
+
+-- | A debug message.
+data Message = Message
+  { messageFrame :: Word.Word32
+  -- ^ Which frame this message belongs to.
+  , messageName :: Text.Text
+  -- ^ The primary player's name.
+  , messageValue :: Text.Text
+  -- ^ The actual payload of the message.
+  }
+
+bytesToMessage :: Binary.Get Message
+bytesToMessage = Message <$> bytesToWord32 <*> bytesToText <*> bytesToText
+
+messageToBytes :: Message -> Binary.Put
+messageToBytes message =
+  word32ToBytes (messageFrame message)
+    <> textToBytes (messageName message)
+    <> textToBytes (messageValue message)
+
+jsonToMessage :: Aeson.Value -> Aeson.Parser Message
+jsonToMessage = Aeson.withObject "Message" $ \object ->
+  Message
+    <$> requiredKey jsonToWord32 object "frame"
+    <*> requiredKey jsonToText object "name"
+    <*> requiredKey jsonToText object "value"
+
+messageToJson :: Message -> Aeson.Encoding
+messageToJson message =
+  Aeson.pairs
+    $ toPair word32ToJson "frame" (messageFrame message)
+    <> toPair textToJson "name" (messageName message)
+    <> toPair textToJson "value" (messageValue message)
 
 
 bytesToFloat :: Binary.Get Float
