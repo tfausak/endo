@@ -411,35 +411,31 @@ data Property
 bytesToProperty :: Binary.Get Property
 bytesToProperty = do
   kind <- bytesToText
+  size <- bytesToWord64
   case kind of
-    "ArrayProperty" -> do
-      size <- bytesToWord64
-      PropertyArray <$> Binary.isolate
-        (word64ToInt size)
-        (bytesToVector (bytesToHashMap bytesToProperty))
+    "ArrayProperty" -> PropertyArray <$> Binary.isolate
+      (word64ToInt size)
+      (bytesToVector (bytesToHashMap bytesToProperty))
     "BoolProperty" -> do
-      0 <- bytesToWord64
+      Monad.unless (size == 0) . fail $ "invalid bool size: " <> show size
       PropertyBool <$> bytesToBool
     "ByteProperty" -> do
-      size <- bytesToWord64
       key <- bytesToText
       if key == "OnlinePlatform_Steam"
         then pure $ PropertyByte "OnlinePlatform" key
         else PropertyByte key <$> Binary.isolate (word64ToInt size) bytesToText
     "FloatProperty" -> do
-      4 <- bytesToWord64
+      Monad.unless (size == 4) . fail $ "invalid float size: " <> show size
       PropertyFloat <$> bytesToFloat
     "IntProperty" -> do
-      4 <- bytesToWord64
+      Monad.unless (size == 4) . fail $ "invalid int size: " <> show size
       PropertyInt <$> bytesToInt32
-    "NameProperty" -> do
-      size <- bytesToWord64
+    "NameProperty" ->
       PropertyName <$> Binary.isolate (word64ToInt size) bytesToText
     "QWordProperty" -> do
-      8 <- bytesToWord64
+      Monad.unless (size == 8) . fail $ "invalid qword size: " <> show size
       PropertyQWord <$> bytesToWord64
-    "StrProperty" -> do
-      size <- bytesToWord64
+    "StrProperty" ->
       PropertyStr <$> Binary.isolate (word64ToInt size) bytesToText
     _ -> fail $ "unknown property kind: " <> show kind
 
