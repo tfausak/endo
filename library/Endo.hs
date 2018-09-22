@@ -1217,7 +1217,7 @@ crc32Bytes
   -> Bytes.ByteString
   -> Word.Word32
 crc32Bytes table initial =
-  Bits.complement . Bytes.foldl (crc32Update table) (Bits.complement initial)
+  Bits.complement . Bytes.foldl' (crc32Update table) (Bits.complement initial)
 
 crc32Initial :: Word.Word32
 crc32Initial = 0xefcbf201
