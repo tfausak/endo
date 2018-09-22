@@ -419,11 +419,11 @@ bytesToProperty = do
       0 <- bytesToWord64
       PropertyBool <$> bytesToBool
     "ByteProperty" -> do
-      _size <- bytesToWord64 -- TODO
+      size <- bytesToWord64
       key <- bytesToText
       if key == "OnlinePlatform_Steam"
         then pure $ PropertyByte "OnlinePlatform" key
-        else PropertyByte key <$> bytesToText
+        else PropertyByte key <$> Binary.isolate (word64ToInt size) bytesToText
     "FloatProperty" -> do
       4 <- bytesToWord64
       PropertyFloat <$> bytesToFloat
@@ -450,8 +450,10 @@ propertyToBytes property = case property of
   PropertyBool bool ->
     textToBytes "BoolProperty" <> word64ToBytes 0 <> boolToBytes bool
   PropertyByte key value ->
-    textToBytes "ByteProperty"
-      <> word64ToBytes 0 -- TODO
+    let bytes = runPut textToBytes value
+    in
+      textToBytes "ByteProperty"
+      <> word64ToBytes (intToWord64 $ Bytes.length bytes)
       <> textToBytes key
       <> textToBytes value
   PropertyFloat float ->
@@ -648,6 +650,7 @@ keyFrameToJson keyFrame =
     <> toPair word32ToJson "position" (keyFramePosition keyFrame)
 
 
+-- TODO
 -- | This is a placeholder until the frames can actually be handled.
 newtype Frames
   = Frames Bytes.ByteString
