@@ -119,21 +119,25 @@ mainWith directory = do
     , "11. Nanoseconds elapsed while encoding"
     , "12. #2 / #11: Encoding rate in mebibytes per second"
     ]
-  mapM_ (test directory) replays
+  ((), elapsed) <- withTime $ mapM_ (test directory) replays
+  IO.hPutStrLn IO.stderr $ Printf.printf
+    "Tested %d replays in %.1f seconds."
+    (length replays)
+    (nanosecondsToSeconds . integerToDouble $ Clock.toNanoSecs elapsed)
 
 test :: FilePath -> (String, String) -> IO ()
 test directory (name, description) = do
   let
     originalReplayFile =
-      FilePath.combine "replays" (FilePath.addExtension name "replay")
+      FilePath.combine "replays" $ FilePath.addExtension name "replay"
   originalReplay <- Bytes.readFile originalReplayFile
   let originalReplaySize = Bytes.length originalReplay
-  ((originalJsonFile, decodeCount), decodeTime) <- withTime
-    (withAllocationCount (decode directory name originalReplayFile))
+  ((originalJsonFile, decodeCount), decodeTime) <-
+    withTime . withAllocationCount $ decode directory name originalReplayFile
   originalJson <- Bytes.readFile originalJsonFile
   let originalJsonSize = Bytes.length originalJson
-  ((modifiedReplayFile, encodeCount), encodeTime) <- withTime
-    (withAllocationCount (encode directory name originalJsonFile))
+  ((modifiedReplayFile, encodeCount), encodeTime) <-
+    withTime . withAllocationCount $ encode directory name originalJsonFile
   modifiedJsonFile <- decode directory name modifiedReplayFile
   modifiedJson <- Bytes.readFile modifiedJsonFile
 
@@ -143,23 +147,23 @@ test directory (name, description) = do
     description
 
   Printf.printf
-    "%4s\t%7d\t%8d\t%3d\t%8d\t%4.1f\t%7d\t%5.3f\t%8d\t%3d\t%8d\t%4.1f\n"
+    "%4s  %7db  %8db  %3dx  %8dns  %4.1fmbps  %7db  %5.3fx  %8db  %3dx  %8dns  %4.1fmbps\n"
     name
     originalReplaySize
     decodeCount
-    (div decodeCount (intToInt64 originalReplaySize))
+    (div decodeCount $ intToInt64 originalReplaySize)
     (Clock.toNanoSecs decodeTime)
     (mbps originalReplaySize decodeTime)
     originalJsonSize
     (fromIntegral originalJsonSize / fromIntegral originalReplaySize :: Float)
     encodeCount
-    (div encodeCount (intToInt64 originalReplaySize))
+    (div encodeCount $ intToInt64 originalReplaySize)
     (Clock.toNanoSecs encodeTime)
     (mbps originalReplaySize encodeTime)
 
 mbps :: Int -> Clock.TimeSpec -> Double
 mbps bytes elapsed = bytesToMegabytes (intToDouble bytes)
-  / nanosecondsToSeconds (integerToDouble (Clock.toNanoSecs elapsed))
+  / nanosecondsToSeconds (integerToDouble $ Clock.toNanoSecs elapsed)
 
 bytesToMegabytes :: Double -> Double
 bytesToMegabytes = (/ (1024 * 1024))
@@ -170,7 +174,7 @@ nanosecondsToSeconds = (/ 1000000000)
 decode :: FilePath -> String -> FilePath -> IO FilePath
 decode directory replay input = do
   let
-    output = FilePath.combine directory (FilePath.addExtension replay "json")
+    output = FilePath.combine directory $ FilePath.addExtension replay "json"
   endo ["--input", input, "--output", output]
   pure output
 
@@ -178,7 +182,7 @@ encode :: FilePath -> String -> FilePath -> IO FilePath
 encode directory replay input = do
   let
     output =
-      FilePath.combine directory (FilePath.addExtension replay "replay")
+      FilePath.combine directory $ FilePath.addExtension replay "replay"
   endo ["--input", input, "--output", output]
   pure output
 
