@@ -42,11 +42,11 @@ import qualified Data.Aeson.Encoding as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.Binary as Binary
 import qualified Data.Binary.Get as Binary
-import qualified Data.Binary.Put as Binary
 import qualified Data.Bits as Bits
 import qualified Data.Bool as Bool
 import qualified Data.ByteString as Bytes
 import qualified Data.ByteString.Base64 as Base64
+import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Char8 as Latin1
 import qualified Data.ByteString.Lazy as LazyBytes
 import qualified Data.Char as Char
@@ -213,7 +213,7 @@ replayFromJson bytes = do
 
 -- | Encodes a binary replay. This is the opposite of 'replayFromBinary'.
 replayToBinary :: Replay -> Bytes.ByteString
-replayToBinary = runPut replayToBytes
+replayToBinary = builderToByteString . replayToBytes
 
 
 -- | A Rocket League replay. Most of the information you'll usually want, like
@@ -229,7 +229,7 @@ bytesToReplay :: Binary.Get Replay
 bytesToReplay =
   Replay <$> bytesToSection bytesToHeader <*> bytesToSection bytesToContent
 
-replayToBytes :: Replay -> Binary.Put
+replayToBytes :: Replay -> Builder.Builder
 replayToBytes replay =
   sectionToBytes headerToBytes (replayHeader replay)
     <> sectionToBytes contentToBytes (replayContent replay)
@@ -273,13 +273,13 @@ bytesToSection decode = do
     <> show expectedCrc
   toSection <$> either fail pure (runGet decode bytes)
 
-sectionToBytes :: (a -> Binary.Put) -> Section a -> Binary.Put
+sectionToBytes :: (a -> Builder.Builder) -> Section a -> Builder.Builder
 sectionToBytes encode section =
-  let bytes = runPut encode $ fromSection section
+  let bytes = builderToByteString . encode $ fromSection section
   in
     word32ToBytes (intToWord32 $ Bytes.length bytes)
     <> word32ToBytes (crc32Bytes crc32Table crc32Initial bytes)
-    <> Binary.putByteString bytes
+    <> Builder.byteString bytes
 
 jsonToSection
   :: (Aeson.Value -> Aeson.Parser a) -> Aeson.Value -> Aeson.Parser (Section a)
@@ -357,7 +357,7 @@ bytesToHeader = do
     <*> bytesToText
     <*> bytesToHashMap bytesToProperty
 
-headerToBytes :: Header -> Binary.Put
+headerToBytes :: Header -> Builder.Builder
 headerToBytes header =
   word32ToBytes (headerMajorVersion header)
     <> word32ToBytes (headerMinorVersion header)
@@ -443,41 +443,43 @@ bytesToProperty = do
       PropertyStr <$> Binary.isolate (word64ToInt size) bytesToText
     _ -> fail $ "unknown property kind: " <> show kind
 
-propertyToBytes :: Property -> Binary.Put
+propertyToBytes :: Property -> Builder.Builder
 propertyToBytes property = case property of
   PropertyArray vector ->
-    let bytes = runPut (vectorToBytes (hashMapToBytes propertyToBytes)) vector
+    let
+      bytes = builderToByteString
+        $ vectorToBytes (hashMapToBytes propertyToBytes) vector
     in
       textToBytes "ArrayProperty"
       <> word64ToBytes (intToWord64 $ Bytes.length bytes)
-      <> vectorToBytes (hashMapToBytes propertyToBytes) vector
+      <> Builder.byteString bytes
   PropertyBool bool ->
     textToBytes "BoolProperty" <> word64ToBytes 0 <> boolToBytes bool
   PropertyByte key value ->
-    let bytes = runPut textToBytes value
+    let bytes = builderToByteString $ textToBytes value
     in
       textToBytes "ByteProperty"
       <> word64ToBytes (intToWord64 $ Bytes.length bytes)
       <> textToBytes key
-      <> textToBytes value
+      <> Builder.byteString bytes
   PropertyFloat float ->
     textToBytes "FloatProperty" <> word64ToBytes 4 <> floatToBytes float
   PropertyInt int32 ->
     textToBytes "IntProperty" <> word64ToBytes 4 <> int32ToBytes int32
   PropertyName text ->
-    let bytes = runPut textToBytes text
+    let bytes = builderToByteString $ textToBytes text
     in
       textToBytes "NameProperty"
       <> word64ToBytes (intToWord64 $ Bytes.length bytes)
-      <> Binary.putByteString bytes
+      <> Builder.byteString bytes
   PropertyQWord word64 ->
     textToBytes "QWordProperty" <> word64ToBytes 8 <> word64ToBytes word64
   PropertyStr text ->
-    let bytes = runPut textToBytes text
+    let bytes = builderToByteString $ textToBytes text
     in
       textToBytes "StrProperty"
       <> word64ToBytes (intToWord64 $ Bytes.length bytes)
-      <> Binary.putByteString bytes
+      <> Builder.byteString bytes
 
 jsonToProperty :: Aeson.Value -> Aeson.Parser Property
 jsonToProperty = Aeson.withObject "Property" $ \object -> do
@@ -569,7 +571,7 @@ bytesToContent =
     <*> bytesToVector bytesToClassMapping
     <*> bytesToVector bytesToCache
 
-contentToBytes :: Content -> Binary.Put
+contentToBytes :: Content -> Builder.Builder
 contentToBytes content =
   vectorToBytes textToBytes (contentLevels content)
     <> vectorToBytes keyFrameToBytes (contentKeyFrames content)
@@ -633,7 +635,7 @@ bytesToKeyFrame :: Binary.Get KeyFrame
 bytesToKeyFrame =
   KeyFrame <$> bytesToFloat <*> bytesToWord32 <*> bytesToWord32
 
-keyFrameToBytes :: KeyFrame -> Binary.Put
+keyFrameToBytes :: KeyFrame -> Builder.Builder
 keyFrameToBytes keyFrame =
   floatToBytes (keyFrameTime keyFrame)
     <> word32ToBytes (keyFrameFrame keyFrame)
@@ -670,12 +672,12 @@ bytesToFrames = do
   size <- bytesToWord32
   toFrames <$> Binary.getByteString (word32ToInt size)
 
-framesToBytes :: Frames -> Binary.Put
-framesToBytes frames =
-  let bytes = fromFrames frames
-  in
-    word32ToBytes (intToWord32 $ Bytes.length bytes)
-      <> Binary.putByteString bytes
+framesToBytes :: Frames -> Builder.Builder
+framesToBytes frames
+  = let bytes = fromFrames frames
+    in
+      word32ToBytes (intToWord32 $ Bytes.length bytes)
+        <> Builder.byteString bytes
 
 jsonToFrames :: Aeson.Value -> Aeson.Parser Frames
 jsonToFrames =
@@ -701,7 +703,7 @@ data Message = Message
 bytesToMessage :: Binary.Get Message
 bytesToMessage = Message <$> bytesToWord32 <*> bytesToText <*> bytesToText
 
-messageToBytes :: Message -> Binary.Put
+messageToBytes :: Message -> Builder.Builder
 messageToBytes message =
   word32ToBytes (messageFrame message)
     <> textToBytes (messageName message)
@@ -733,7 +735,7 @@ data Mark = Mark
 bytesToMark :: Binary.Get Mark
 bytesToMark = Mark <$> bytesToText <*> bytesToWord32
 
-markToBytes :: Mark -> Binary.Put
+markToBytes :: Mark -> Builder.Builder
 markToBytes mark =
   textToBytes (markValue mark) <> word32ToBytes (markFrame mark)
 
@@ -760,7 +762,7 @@ data ClassMapping = ClassMapping
 bytesToClassMapping :: Binary.Get ClassMapping
 bytesToClassMapping = ClassMapping <$> bytesToText <*> bytesToWord32
 
-classMappingToBytes :: ClassMapping -> Binary.Put
+classMappingToBytes :: ClassMapping -> Builder.Builder
 classMappingToBytes classMapping = textToBytes (classMappingName classMapping)
   <> word32ToBytes (classMappingStreamId classMapping)
 
@@ -793,7 +795,7 @@ bytesToCache =
     <*> bytesToWord32
     <*> bytesToVector bytesToAttributeMapping
 
-cacheToBytes :: Cache -> Binary.Put
+cacheToBytes :: Cache -> Builder.Builder
 cacheToBytes cache =
   word32ToBytes (cacheClassId cache)
     <> word32ToBytes (cacheParentCacheId cache)
@@ -831,7 +833,7 @@ data AttributeMapping = AttributeMapping
 bytesToAttributeMapping :: Binary.Get AttributeMapping
 bytesToAttributeMapping = AttributeMapping <$> bytesToWord32 <*> bytesToWord32
 
-attributeMappingToBytes :: AttributeMapping -> Binary.Put
+attributeMappingToBytes :: AttributeMapping -> Builder.Builder
 attributeMappingToBytes attributeMapping =
   word32ToBytes (attributeMappingObjectId attributeMapping)
     <> word32ToBytes (attributeMappingStreamId attributeMapping)
@@ -863,8 +865,8 @@ bytesToBool = do
     1 -> pure True
     _ -> fail $ "invalid boolean: " <> show byte
 
-boolToBytes :: Bool -> Binary.Put
-boolToBytes = Binary.putWord8 . Bool.bool 0 1
+boolToBytes :: Bool -> Builder.Builder
+boolToBytes = Builder.word8 . Bool.bool 0 1
 
 jsonToBool :: Aeson.Value -> Aeson.Parser Bool
 jsonToBool = Aeson.parseJSON
@@ -876,7 +878,7 @@ boolToJson = Aeson.toEncoding
 bytesToFloat :: Binary.Get Float
 bytesToFloat = word32ToFloat <$> bytesToWord32
 
-floatToBytes :: Float -> Binary.Put
+floatToBytes :: Float -> Builder.Builder
 floatToBytes = word32ToBytes . floatToWord32
 
 jsonToFloat :: Aeson.Value -> Aeson.Parser Float
@@ -902,7 +904,7 @@ bytesToHashMapWith decode hashMap = do
       bytesToHashMapWith decode $ HashMap.insert key value hashMap
 
 hashMapToBytes
-  :: (v -> Binary.Put) -> HashMap.HashMap Text.Text v -> Binary.Put
+  :: (v -> Builder.Builder) -> HashMap.HashMap Text.Text v -> Builder.Builder
 hashMapToBytes encode = HashMap.foldrWithKey
   (\key value put -> textToBytes key <> encode value <> put)
   (textToBytes "None")
@@ -921,8 +923,8 @@ hashMapToJson encode = Aeson.dict Aeson.text encode HashMap.foldrWithKey
 bytesToInt32 :: Binary.Get Int.Int32
 bytesToInt32 = Binary.getInt32le
 
-int32ToBytes :: Int.Int32 -> Binary.Put
-int32ToBytes = Binary.putInt32le
+int32ToBytes :: Int.Int32 -> Builder.Builder
+int32ToBytes = Builder.int32LE
 
 jsonToInt32 :: Aeson.Value -> Aeson.Parser Int.Int32
 jsonToInt32 = Aeson.parseJSON
@@ -935,7 +937,7 @@ bytesToMaybe :: Binary.Get a -> Bool -> Binary.Get (Maybe a)
 bytesToMaybe decode condition =
   if condition then Just <$> decode else pure Nothing
 
-maybeToBytes :: (a -> Binary.Put) -> Maybe a -> Binary.Put
+maybeToBytes :: (a -> Builder.Builder) -> Maybe a -> Builder.Builder
 maybeToBytes = maybe mempty
 
 jsonToMaybe
@@ -951,8 +953,8 @@ maybeToJson = maybe Aeson.null_
 bytesToWord32 :: Binary.Get Word.Word32
 bytesToWord32 = Binary.getWord32le
 
-word32ToBytes :: Word.Word32 -> Binary.Put
-word32ToBytes = Binary.putWord32le
+word32ToBytes :: Word.Word32 -> Builder.Builder
+word32ToBytes = Builder.word32LE
 
 jsonToWord32 :: Aeson.Value -> Aeson.Parser Word.Word32
 jsonToWord32 = Aeson.parseJSON
@@ -964,8 +966,8 @@ word32ToJson = Aeson.toEncoding
 bytesToWord64 :: Binary.Get Word.Word64
 bytesToWord64 = Binary.getWord64le
 
-word64ToBytes :: Word.Word64 -> Binary.Put
-word64ToBytes = Binary.putWord64le
+word64ToBytes :: Word.Word64 -> Builder.Builder
+word64ToBytes = Builder.word64LE
 
 jsonToWord64 :: Aeson.Value -> Aeson.Parser Word.Word64
 jsonToWord64 = Aeson.parseJSON
@@ -982,7 +984,7 @@ bytesToText = do
     then Text.decodeUtf16LE <$> Binary.getByteString (-2 * int32ToInt size)
     else Text.decodeLatin1 <$> Binary.getByteString (int32ToInt size)
 
-textToBytes :: Text.Text -> Binary.Put
+textToBytes :: Text.Text -> Builder.Builder
 textToBytes text
   = let textWithNull = Text.snoc text '\x00'
     in
@@ -991,13 +993,13 @@ textToBytes text
           let bytes = encodeLatin1 textWithNull
           in
             int32ToBytes (intToInt32 $ Bytes.length bytes)
-              <> Binary.putByteString bytes
+              <> Builder.byteString bytes
         else
           let bytes = Text.encodeUtf16LE textWithNull
           in
             int32ToBytes
                 (flip div 2 . negate . intToInt32 $ Bytes.length bytes)
-              <> Binary.putByteString bytes
+              <> Builder.byteString bytes
 
 jsonToText :: Aeson.Value -> Aeson.Parser Text.Text
 jsonToText = Aeson.parseJSON
@@ -1011,10 +1013,9 @@ bytesToVector decode = do
   size <- bytesToWord32
   Vector.replicateM (word32ToInt size) decode
 
-vectorToBytes :: (a -> Binary.Put) -> Vector.Vector a -> Binary.Put
-vectorToBytes encode vector = do
-  word32ToBytes . intToWord32 $ Vector.length vector
-  Vector.mapM_ encode vector
+vectorToBytes :: (a -> Builder.Builder) -> Vector.Vector a -> Builder.Builder
+vectorToBytes encode vector =
+  word32ToBytes (intToWord32 $ Vector.length vector) <> foldMap encode vector
 
 jsonToVector
   :: (Aeson.Value -> Aeson.Parser a)
@@ -1491,6 +1492,9 @@ crc32Update table crc byte = do
   Bits.xor left right
 
 
+builderToByteString :: Builder.Builder -> Bytes.ByteString
+builderToByteString = LazyBytes.toStrict . Builder.toLazyByteString
+
 dieLn :: String -> IO a
 dieLn = Exit.die
 
@@ -1543,9 +1547,6 @@ runGet decode =
   either (Left . third) (Right . third)
     . Binary.runGetOrFail decode
     . LazyBytes.fromStrict
-
-runPut :: (a -> Binary.Put) -> a -> Bytes.ByteString
-runPut encode = LazyBytes.toStrict . Binary.runPut . encode
 
 third :: (a, b, c) -> c
 third (_, _, c) = c
