@@ -413,8 +413,10 @@ bytesToProperty = do
   kind <- bytesToText
   case kind of
     "ArrayProperty" -> do
-      _size <- bytesToWord64 -- TODO
-      PropertyArray <$> bytesToVector (bytesToHashMap bytesToProperty)
+      size <- bytesToWord64
+      PropertyArray <$> Binary.isolate
+        (word64ToInt size)
+        (bytesToVector (bytesToHashMap bytesToProperty))
     "BoolProperty" -> do
       0 <- bytesToWord64
       PropertyBool <$> bytesToBool
@@ -444,8 +446,10 @@ bytesToProperty = do
 propertyToBytes :: Property -> Binary.Put
 propertyToBytes property = case property of
   PropertyArray vector ->
-    textToBytes "ArrayProperty"
-      <> word64ToBytes 0 -- TODO
+    let bytes = runPut (vectorToBytes (hashMapToBytes propertyToBytes)) vector
+    in
+      textToBytes "ArrayProperty"
+      <> word64ToBytes (intToWord64 $ Bytes.length bytes)
       <> vectorToBytes (hashMapToBytes propertyToBytes) vector
   PropertyBool bool ->
     textToBytes "BoolProperty" <> word64ToBytes 0 <> boolToBytes bool
