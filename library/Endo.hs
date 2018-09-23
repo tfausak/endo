@@ -226,13 +226,11 @@ data Replay = Replay
   }
 
 getReplay :: Binary.Get Replay
-getReplay =
-  Replay <$> getSection getHeader <*> getSection getContent
+getReplay = Replay <$> getSection getHeader <*> getSection getContent
 
 putReplay :: Replay -> Builder.Builder
-putReplay replay =
-  putSection putHeader (replayHeader replay)
-    <> putSection putContent (replayContent replay)
+putReplay replay = putSection putHeader (replayHeader replay)
+  <> putSection putContent (replayContent replay)
 
 jsonToReplay :: Aeson.Value -> Aeson.Parser Replay
 jsonToReplay = Aeson.withObject "Replay" $ \object ->
@@ -435,22 +433,19 @@ getProperty = do
     "QWordProperty" -> do
       Monad.unless (size == 8) . fail $ "invalid qword size: " <> show size
       PropertyQWord <$> getWord64
-    "StrProperty" ->
-      PropertyStr <$> Binary.isolate (word64ToInt size) getText
+    "StrProperty" -> PropertyStr <$> Binary.isolate (word64ToInt size) getText
     _ -> fail $ "unknown property kind: " <> show kind
 
 putProperty :: Property -> Builder.Builder
 putProperty property = case property of
   PropertyArray vector ->
     let
-      bytes = builderToByteString
-        $ putVector (putHashMap putProperty) vector
+      bytes = builderToByteString $ putVector (putHashMap putProperty) vector
     in
       putText "ArrayProperty"
       <> putWord64 (intToWord64 $ ByteString.length bytes)
       <> Builder.byteString bytes
-  PropertyBool bool ->
-    putText "BoolProperty" <> putWord64 0 <> putBool bool
+  PropertyBool bool -> putText "BoolProperty" <> putWord64 0 <> putBool bool
   PropertyByte key value ->
     let bytes = builderToByteString $ putText value
     in
@@ -460,8 +455,7 @@ putProperty property = case property of
       <> Builder.byteString bytes
   PropertyFloat float ->
     putText "FloatProperty" <> putWord64 4 <> putFloat float
-  PropertyInt int32 ->
-    putText "IntProperty" <> putWord64 4 <> putInt32 int32
+  PropertyInt int32 -> putText "IntProperty" <> putWord64 4 <> putInt32 int32
   PropertyName text ->
     let bytes = builderToByteString $ putText text
     in
@@ -628,8 +622,7 @@ data KeyFrame = KeyFrame
   }
 
 getKeyFrame :: Binary.Get KeyFrame
-getKeyFrame =
-  KeyFrame <$> getFloat <*> getWord32 <*> getWord32
+getKeyFrame = KeyFrame <$> getFloat <*> getWord32 <*> getWord32
 
 putKeyFrame :: KeyFrame -> Builder.Builder
 putKeyFrame keyFrame =
@@ -701,9 +694,8 @@ getMessage = Message <$> getWord32 <*> getText <*> getText
 
 putMessage :: Message -> Builder.Builder
 putMessage message =
-  putWord32 (messageFrame message)
-    <> putText (messageName message)
-    <> putText (messageValue message)
+  putWord32 (messageFrame message) <> putText (messageName message) <> putText
+    (messageValue message)
 
 jsonToMessage :: Aeson.Value -> Aeson.Parser Message
 jsonToMessage = Aeson.withObject "Message" $ \object ->
@@ -732,8 +724,7 @@ getMark :: Binary.Get Mark
 getMark = Mark <$> getText <*> getWord32
 
 putMark :: Mark -> Builder.Builder
-putMark mark =
-  putText (markValue mark) <> putWord32 (markFrame mark)
+putMark mark = putText (markValue mark) <> putWord32 (markFrame mark)
 
 jsonToMark :: Aeson.Value -> Aeson.Parser Mark
 jsonToMark = Aeson.withObject "Mark" $ \object ->
