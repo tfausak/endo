@@ -196,7 +196,7 @@ mainWith name arguments = do
 -- give you back what you started with (unlike 'replayFromJson'). The result
 -- should be effectively the same, but the actual bytes might differ slightly.
 replayFromBinary :: ByteString.ByteString -> Either String Replay
-replayFromBinary = runGet bytesToReplay
+replayFromBinary = runGet getReplay
 
 -- | Encodes a JSON replay. This is the opposite of 'replayFromJson'.
 replayToJson :: Replay -> ByteString.ByteString
@@ -225,9 +225,9 @@ data Replay = Replay
   , replayContent :: Section Content
   }
 
-bytesToReplay :: Binary.Get Replay
-bytesToReplay =
-  Replay <$> bytesToSection bytesToHeader <*> bytesToSection bytesToContent
+getReplay :: Binary.Get Replay
+getReplay =
+  Replay <$> getSection getHeader <*> getSection getContent
 
 replayToBytes :: Replay -> Builder.Builder
 replayToBytes replay =
@@ -259,10 +259,10 @@ toSection = Section
 fromSection :: Section a -> a
 fromSection (Section a) = a
 
-bytesToSection :: Binary.Get a -> Binary.Get (Section a)
-bytesToSection decode = do
-  size <- bytesToWord32
-  expectedCrc <- bytesToWord32
+getSection :: Binary.Get a -> Binary.Get (Section a)
+getSection decode = do
+  size <- getWord32
+  expectedCrc <- getWord32
   bytes <- Binary.getByteString $ word32ToInt size
   let actualCrc = crc32Bytes crc32Table crc32Initial bytes
   Monad.unless (actualCrc == expectedCrc)
@@ -348,14 +348,14 @@ data Header = Header
   -- 1v2.
   }
 
-bytesToHeader :: Binary.Get Header
-bytesToHeader = do
-  majorVersion <- bytesToWord32
-  minorVersion <- bytesToWord32
+getHeader :: Binary.Get Header
+getHeader = do
+  majorVersion <- getWord32
+  minorVersion <- getWord32
   Header majorVersion minorVersion
-    <$> bytesToMaybe bytesToWord32 (hasPatchVersion majorVersion minorVersion)
-    <*> bytesToText
-    <*> bytesToHashMap bytesToProperty
+    <$> getMaybe getWord32 (hasPatchVersion majorVersion minorVersion)
+    <*> getText
+    <*> getHashMap getProperty
 
 headerToBytes :: Header -> Builder.Builder
 headerToBytes header =
@@ -408,35 +408,35 @@ data Property
   | PropertyQWord Word.Word64
   | PropertyStr Text.Text
 
-bytesToProperty :: Binary.Get Property
-bytesToProperty = do
-  kind <- bytesToText
-  size <- bytesToWord64
+getProperty :: Binary.Get Property
+getProperty = do
+  kind <- getText
+  size <- getWord64
   case kind of
     "ArrayProperty" -> PropertyArray <$> Binary.isolate
       (word64ToInt size)
-      (bytesToVector (bytesToHashMap bytesToProperty))
+      (getVector (getHashMap getProperty))
     "BoolProperty" -> do
       Monad.unless (size == 0) . fail $ "invalid bool size: " <> show size
-      PropertyBool <$> bytesToBool
+      PropertyBool <$> getBool
     "ByteProperty" -> do
-      key <- bytesToText
+      key <- getText
       if key == "OnlinePlatform_Steam"
         then pure $ PropertyByte "OnlinePlatform" key
-        else PropertyByte key <$> Binary.isolate (word64ToInt size) bytesToText
+        else PropertyByte key <$> Binary.isolate (word64ToInt size) getText
     "FloatProperty" -> do
       Monad.unless (size == 4) . fail $ "invalid float size: " <> show size
-      PropertyFloat <$> bytesToFloat
+      PropertyFloat <$> getFloat
     "IntProperty" -> do
       Monad.unless (size == 4) . fail $ "invalid int size: " <> show size
-      PropertyInt <$> bytesToInt32
+      PropertyInt <$> getInt32
     "NameProperty" ->
-      PropertyName <$> Binary.isolate (word64ToInt size) bytesToText
+      PropertyName <$> Binary.isolate (word64ToInt size) getText
     "QWordProperty" -> do
       Monad.unless (size == 8) . fail $ "invalid qword size: " <> show size
-      PropertyQWord <$> bytesToWord64
+      PropertyQWord <$> getWord64
     "StrProperty" ->
-      PropertyStr <$> Binary.isolate (word64ToInt size) bytesToText
+      PropertyStr <$> Binary.isolate (word64ToInt size) getText
     _ -> fail $ "unknown property kind: " <> show kind
 
 propertyToBytes :: Property -> Builder.Builder
@@ -553,19 +553,19 @@ data Content = Content
   -- ^ A list of classes along with their parent classes and attributes.
   }
 
-bytesToContent :: Binary.Get Content
-bytesToContent =
+getContent :: Binary.Get Content
+getContent =
   Content
-    <$> bytesToVector bytesToText
-    <*> bytesToVector bytesToKeyFrame
-    <*> bytesToFrames
-    <*> bytesToVector bytesToMessage
-    <*> bytesToVector bytesToMark
-    <*> bytesToVector bytesToText
-    <*> bytesToVector bytesToText
-    <*> bytesToVector bytesToText
-    <*> bytesToVector bytesToClassMapping
-    <*> bytesToVector bytesToCache
+    <$> getVector getText
+    <*> getVector getKeyFrame
+    <*> getFrames
+    <*> getVector getMessage
+    <*> getVector getMark
+    <*> getVector getText
+    <*> getVector getText
+    <*> getVector getText
+    <*> getVector getClassMapping
+    <*> getVector getCache
 
 contentToBytes :: Content -> Builder.Builder
 contentToBytes content =
@@ -627,9 +627,9 @@ data KeyFrame = KeyFrame
   -- ^ The bit position of this key frame in the network stream.
   }
 
-bytesToKeyFrame :: Binary.Get KeyFrame
-bytesToKeyFrame =
-  KeyFrame <$> bytesToFloat <*> bytesToWord32 <*> bytesToWord32
+getKeyFrame :: Binary.Get KeyFrame
+getKeyFrame =
+  KeyFrame <$> getFloat <*> getWord32 <*> getWord32
 
 keyFrameToBytes :: KeyFrame -> Builder.Builder
 keyFrameToBytes keyFrame =
@@ -663,9 +663,9 @@ toFrames = Frames
 fromFrames :: Frames -> ByteString.ByteString
 fromFrames (Frames bytes) = bytes
 
-bytesToFrames :: Binary.Get Frames
-bytesToFrames = do
-  size <- bytesToWord32
+getFrames :: Binary.Get Frames
+getFrames = do
+  size <- getWord32
   toFrames <$> Binary.getByteString (word32ToInt size)
 
 framesToBytes :: Frames -> Builder.Builder
@@ -696,8 +696,8 @@ data Message = Message
   -- ^ The actual payload of the message.
   }
 
-bytesToMessage :: Binary.Get Message
-bytesToMessage = Message <$> bytesToWord32 <*> bytesToText <*> bytesToText
+getMessage :: Binary.Get Message
+getMessage = Message <$> getWord32 <*> getText <*> getText
 
 messageToBytes :: Message -> Builder.Builder
 messageToBytes message =
@@ -728,8 +728,8 @@ data Mark = Mark
   -- ^ Which frame this mark belongs to, starting from 0.
   }
 
-bytesToMark :: Binary.Get Mark
-bytesToMark = Mark <$> bytesToText <*> bytesToWord32
+getMark :: Binary.Get Mark
+getMark = Mark <$> getText <*> getWord32
 
 markToBytes :: Mark -> Builder.Builder
 markToBytes mark =
@@ -755,8 +755,8 @@ data ClassMapping = ClassMapping
   , classMappingStreamId :: Word.Word32
   }
 
-bytesToClassMapping :: Binary.Get ClassMapping
-bytesToClassMapping = ClassMapping <$> bytesToText <*> bytesToWord32
+getClassMapping :: Binary.Get ClassMapping
+getClassMapping = ClassMapping <$> getText <*> getWord32
 
 classMappingToBytes :: ClassMapping -> Builder.Builder
 classMappingToBytes classMapping = textToBytes (classMappingName classMapping)
@@ -783,13 +783,13 @@ data Cache = Cache
   , cacheAttributeMappings :: Vector.Vector AttributeMapping
   }
 
-bytesToCache :: Binary.Get Cache
-bytesToCache =
+getCache :: Binary.Get Cache
+getCache =
   Cache
-    <$> bytesToWord32
-    <*> bytesToWord32
-    <*> bytesToWord32
-    <*> bytesToVector bytesToAttributeMapping
+    <$> getWord32
+    <*> getWord32
+    <*> getWord32
+    <*> getVector getAttributeMapping
 
 cacheToBytes :: Cache -> Builder.Builder
 cacheToBytes cache =
@@ -826,8 +826,8 @@ data AttributeMapping = AttributeMapping
   , attributeMappingStreamId :: Word.Word32
   }
 
-bytesToAttributeMapping :: Binary.Get AttributeMapping
-bytesToAttributeMapping = AttributeMapping <$> bytesToWord32 <*> bytesToWord32
+getAttributeMapping :: Binary.Get AttributeMapping
+getAttributeMapping = AttributeMapping <$> getWord32 <*> getWord32
 
 attributeMappingToBytes :: AttributeMapping -> Builder.Builder
 attributeMappingToBytes attributeMapping =
@@ -853,8 +853,8 @@ attributeMappingToJson attributeMapping =
          (attributeMappingStreamId attributeMapping)
 
 
-bytesToBool :: Binary.Get Bool
-bytesToBool = do
+getBool :: Binary.Get Bool
+getBool = do
   byte <- Binary.getWord8
   case byte of
     0 -> pure False
@@ -871,8 +871,8 @@ boolToJson :: Bool -> Aeson.Encoding
 boolToJson = Aeson.toEncoding
 
 
-bytesToFloat :: Binary.Get Float
-bytesToFloat = word32ToFloat <$> bytesToWord32
+getFloat :: Binary.Get Float
+getFloat = word32ToFloat <$> getWord32
 
 floatToBytes :: Float -> Builder.Builder
 floatToBytes = word32ToBytes . floatToWord32
@@ -884,20 +884,20 @@ floatToJson :: Float -> Aeson.Encoding
 floatToJson = Aeson.toEncoding
 
 
-bytesToHashMap :: Binary.Get v -> Binary.Get (HashMap.HashMap Text.Text v)
-bytesToHashMap decode = bytesToHashMapWith decode HashMap.empty
+getHashMap :: Binary.Get v -> Binary.Get (HashMap.HashMap Text.Text v)
+getHashMap decode = getHashMapWith decode HashMap.empty
 
-bytesToHashMapWith
+getHashMapWith
   :: Binary.Get v
   -> HashMap.HashMap Text.Text v
   -> Binary.Get (HashMap.HashMap Text.Text v)
-bytesToHashMapWith decode hashMap = do
-  key <- bytesToText
+getHashMapWith decode hashMap = do
+  key <- getText
   if key == "None"
     then pure hashMap
     else do
       value <- decode
-      bytesToHashMapWith decode $ HashMap.insert key value hashMap
+      getHashMapWith decode $ HashMap.insert key value hashMap
 
 hashMapToBytes
   :: (v -> Builder.Builder) -> HashMap.HashMap Text.Text v -> Builder.Builder
@@ -916,8 +916,8 @@ hashMapToJson
 hashMapToJson encode = Aeson.dict Aeson.text encode HashMap.foldrWithKey
 
 
-bytesToInt32 :: Binary.Get Int.Int32
-bytesToInt32 = Binary.getInt32le
+getInt32 :: Binary.Get Int.Int32
+getInt32 = Binary.getInt32le
 
 int32ToBytes :: Int.Int32 -> Builder.Builder
 int32ToBytes = Builder.int32LE
@@ -929,8 +929,8 @@ int32ToJson :: Int.Int32 -> Aeson.Encoding
 int32ToJson = Aeson.toEncoding
 
 
-bytesToMaybe :: Binary.Get a -> Bool -> Binary.Get (Maybe a)
-bytesToMaybe decode condition =
+getMaybe :: Binary.Get a -> Bool -> Binary.Get (Maybe a)
+getMaybe decode condition =
   if condition then Just <$> decode else pure Nothing
 
 maybeToBytes :: (a -> Builder.Builder) -> Maybe a -> Builder.Builder
@@ -946,8 +946,8 @@ maybeToJson :: (a -> Aeson.Encoding) -> Maybe a -> Aeson.Encoding
 maybeToJson = maybe Aeson.null_
 
 
-bytesToWord32 :: Binary.Get Word.Word32
-bytesToWord32 = Binary.getWord32le
+getWord32 :: Binary.Get Word.Word32
+getWord32 = Binary.getWord32le
 
 word32ToBytes :: Word.Word32 -> Builder.Builder
 word32ToBytes = Builder.word32LE
@@ -959,8 +959,8 @@ word32ToJson :: Word.Word32 -> Aeson.Encoding
 word32ToJson = Aeson.toEncoding
 
 
-bytesToWord64 :: Binary.Get Word.Word64
-bytesToWord64 = Binary.getWord64le
+getWord64 :: Binary.Get Word.Word64
+getWord64 = Binary.getWord64le
 
 word64ToBytes :: Word.Word64 -> Builder.Builder
 word64ToBytes = Builder.word64LE
@@ -972,9 +972,9 @@ word64ToJson :: Word.Word64 -> Aeson.Encoding
 word64ToJson = Aeson.toEncoding
 
 
-bytesToText :: Binary.Get Text.Text
-bytesToText = do
-  rawSize <- bytesToInt32
+getText :: Binary.Get Text.Text
+getText = do
+  rawSize <- getInt32
   let size = if rawSize == 0x05000000 then 8 else rawSize
   Text.filter (/= '\x00') <$> if size < 0
     then Text.decodeUtf16LE <$> Binary.getByteString (-2 * int32ToInt size)
@@ -1004,9 +1004,9 @@ textToJson :: Text.Text -> Aeson.Encoding
 textToJson = Aeson.toEncoding
 
 
-bytesToVector :: Binary.Get a -> Binary.Get (Vector.Vector a)
-bytesToVector decode = do
-  size <- bytesToWord32
+getVector :: Binary.Get a -> Binary.Get (Vector.Vector a)
+getVector decode = do
+  size <- getWord32
   Vector.replicateM (word32ToInt size) decode
 
 vectorToBytes :: (a -> Builder.Builder) -> Vector.Vector a -> Builder.Builder
