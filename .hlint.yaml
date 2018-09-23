@@ -10,9 +10,9 @@
   - { name: Data.Aeson, as: Aeson }
   - { name: Data.Aeson.Encoding, as: Aeson }
   - { name: Data.Aeson.Types, as: Aeson }
-  - { name: Data.Binary, as: Binary }
-  - { name: Data.Binary.Get, as: Binary }
-  - { name: Data.Bits, as: Bits }
+  - { name: Data.Binary, as: Bytes }
+  - { name: Data.Binary.Get, as: Bytes }
+  - { name: Data.Bits, as: Bitwise }
   - { name: Data.Bool, as: Bool }
   - { name: Data.ByteString, as: ByteString }
   - { name: Data.ByteString.Base64, as: Base64 }
