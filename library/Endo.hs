@@ -27,7 +27,7 @@ module Endo
   , Property(..)
   , Content(..)
   , KeyFrame(..)
-  , Frames(..)
+  , Frame(..)
   , Message(..)
   , Mark(..)
   , ClassMapping(..)
@@ -41,15 +41,18 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encoding as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.Binary as Bytes
+import qualified Data.Binary.Bits.Get as Bits
+import qualified Data.Binary.Bits.Put as Bits
 import qualified Data.Binary.Get as Bytes
+import qualified Data.Binary.Put as Bytes
 import qualified Data.Bits as Bitwise
 import qualified Data.Bool as Bool
 import qualified Data.ByteString as ByteString
-import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Char8 as Latin1
 import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.Char as Char
+import qualified Data.Foldable as Foldable
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.Int as Int
 import qualified Data.List as List
@@ -226,7 +229,9 @@ data Replay = Replay
   }
 
 getReplay :: Bytes.Get Replay
-getReplay = Replay <$> getSection getHeader <*> getSection getContent
+getReplay = do
+  header <- getSection getHeader
+  Replay header <$> getSection (getContent $ fromSection header)
 
 putReplay :: Replay -> Builder.Builder
 putReplay replay = putSection putHeader (replayHeader replay)
@@ -525,7 +530,7 @@ data Content = Content
   -- ^ A list of which frames are key frames. Although they aren't necessary
   -- for replays, key frames are frames that replicate every actor. They
   -- typically happen once every 10 seconds.
-  , contentFrames :: Frames
+  , contentFrames :: Vector.Vector Frame
   -- ^ The actual game data. This is where all the interesting information is.
   -- If you can see it by watching a replay in the Rocket League client, it's
   -- in here.
@@ -547,19 +552,31 @@ data Content = Content
   -- ^ A list of classes along with their parent classes and attributes.
   }
 
-getContent :: Bytes.Get Content
-getContent =
-  Content
-    <$> getVector getText
-    <*> getVector getKeyFrame
-    <*> getFrames
-    <*> getVector getMessage
-    <*> getVector getMark
-    <*> getVector getText
-    <*> getVector getText
-    <*> getVector getText
-    <*> getVector getClassMapping
-    <*> getVector getCache
+getContent :: Header -> Bytes.Get Content
+getContent header = do
+  levels <- getVector getText
+  keyFrames <- getVector getKeyFrame
+  size <- getWord32
+  bytes <- Bytes.getByteString $ word32ToInt size
+  messages <- getVector getMessage
+  marks <- getVector getMark
+  packages <- getVector getText
+  objects <- getVector getText
+  names <- getVector getText
+  classMappings <- getVector getClassMapping
+  caches <- getVector getCache
+  frames <- getFrames header bytes
+  pure $ Content
+    levels
+    keyFrames
+    frames
+    messages
+    marks
+    packages
+    objects
+    names
+    classMappings
+    caches
 
 putContent :: Content -> Builder.Builder
 putContent content =
@@ -645,38 +662,49 @@ keyFrameToJson keyFrame =
     <> toPair word32ToJson "position" (keyFramePosition keyFrame)
 
 
--- TODO
--- | This is a placeholder until the frames can actually be handled.
-newtype Frames
-  = Frames ByteString.ByteString
+getFrames :: Header -> ByteString.ByteString -> Bytes.Get (Vector.Vector Frame)
+getFrames header =
+  let
+    properties = headerProperties header
+    numFrames = case HashMap.lookup "NumFrames" properties of
+      Just (PropertyInt int32) -> int32ToInt int32
+      _ -> 0
+  in either fail pure
+    . runGet (Bits.runBitGet $ Vector.replicateM numFrames getFrame)
 
-toFrames :: ByteString.ByteString -> Frames
-toFrames = Frames
-
-fromFrames :: Frames -> ByteString.ByteString
-fromFrames (Frames bytes) = bytes
-
-getFrames :: Bytes.Get Frames
-getFrames = do
-  size <- getWord32
-  toFrames <$> Bytes.getByteString (word32ToInt size)
-
-putFrames :: Frames -> Builder.Builder
+putFrames :: Vector.Vector Frame -> Builder.Builder
 putFrames frames =
-  let bytes = fromFrames frames
+  let
+    bytes =
+      LazyByteString.toStrict
+        . Bytes.runPut
+        . Bits.runBitPut
+        $ Foldable.traverse_ putFrame frames
   in
     putWord32 (intToWord32 $ ByteString.length bytes)
       <> Builder.byteString bytes
 
-jsonToFrames :: Aeson.Value -> Aeson.Parser Frames
-jsonToFrames =
-  Aeson.withText "Frames"
-    $ either fail (pure . toFrames)
-    . Base64.decode
-    . Text.encodeUtf8
+jsonToFrames :: Aeson.Value -> Aeson.Parser (Vector.Vector Frame)
+jsonToFrames = jsonToVector jsonToFrame
 
-framesToJson :: Frames -> Aeson.Encoding
-framesToJson = Aeson.toEncoding . Text.decodeUtf8 . Base64.encode . fromFrames
+framesToJson :: Vector.Vector Frame -> Aeson.Encoding
+framesToJson = vectorToJson frameToJson
+
+
+-- TODO
+data Frame = Frame
+
+getFrame :: Bits.BitGet Frame
+getFrame = pure Frame
+
+putFrame :: Frame -> Bits.BitPut ()
+putFrame _ = pure ()
+
+jsonToFrame :: Aeson.Value -> Aeson.Parser Frame
+jsonToFrame = Aeson.withObject "Frame" $ \_ -> pure Frame
+
+frameToJson :: Frame -> Aeson.Encoding
+frameToJson _ = Aeson.pairs mempty
 
 
 -- | A debug message.

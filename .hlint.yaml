@@ -11,15 +11,18 @@
   - { name: Data.Aeson.Encoding, as: Aeson }
   - { name: Data.Aeson.Types, as: Aeson }
   - { name: Data.Binary, as: Bytes }
+  - { name: Data.Binary.Bits.Get, as: Bits }
+  - { name: Data.Binary.Bits.Put, as: Bits }
   - { name: Data.Binary.Get, as: Bytes }
+  - { name: Data.Binary.Put, as: Bytes }
   - { name: Data.Bits, as: Bitwise }
   - { name: Data.Bool, as: Bool }
   - { name: Data.ByteString, as: ByteString }
-  - { name: Data.ByteString.Base64, as: Base64 }
   - { name: Data.ByteString.Builder, as: Builder }
   - { name: Data.ByteString.Char8, as: Latin1 }
   - { name: Data.ByteString.Lazy, as: LazyByteString }
   - { name: Data.Char, as: Char }
+  - { name: Data.Foldable, as: Foldable }
   - { name: Data.HashMap.Strict, as: HashMap }
   - { name: Data.Int, as: Int }
   - { name: Data.List, as: List }
