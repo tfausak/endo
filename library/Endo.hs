@@ -44,11 +44,11 @@ import qualified Data.Binary as Binary
 import qualified Data.Binary.Get as Binary
 import qualified Data.Bits as Bits
 import qualified Data.Bool as Bool
-import qualified Data.ByteString as Bytes
+import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Char8 as Latin1
-import qualified Data.ByteString.Lazy as LazyBytes
+import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.Char as Char
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.Int as Int
@@ -59,7 +59,7 @@ import qualified Data.Text.Encoding as Text
 import qualified Data.Vector as Vector
 import qualified Data.Version as Version
 import qualified Data.Word as Word
-import qualified Paths_endo as Package
+import qualified Paths_endo as This
 import qualified System.Console.GetOpt as Console
 import qualified System.Environment as Environment
 import qualified System.Exit as Exit
@@ -195,24 +195,24 @@ mainWith name arguments = do
 -- that converting from binary and then back to binary is /not/ guaranteed to
 -- give you back what you started with (unlike 'replayFromJson'). The result
 -- should be effectively the same, but the actual bytes might differ slightly.
-replayFromBinary :: Bytes.ByteString -> Either String Replay
+replayFromBinary :: ByteString.ByteString -> Either String Replay
 replayFromBinary = runGet bytesToReplay
 
 -- | Encodes a JSON replay. This is the opposite of 'replayFromJson'.
-replayToJson :: Replay -> Bytes.ByteString
+replayToJson :: Replay -> ByteString.ByteString
 replayToJson =
-  LazyBytes.toStrict . Aeson.encodingToLazyByteString . replayToJson_
+  LazyByteString.toStrict . Aeson.encodingToLazyByteString . replayToJson_
 
 -- | Decodes a JSON replay. This is the opposite of 'replayToJson'. Note that
 -- converting from JSON and then back to JSON /is/ guaranteed to give you back
 -- what you started with (unlike 'replayFromBinary').
-replayFromJson :: Bytes.ByteString -> Either String Replay
+replayFromJson :: ByteString.ByteString -> Either String Replay
 replayFromJson bytes = do
   json <- Aeson.eitherDecodeStrict bytes
   Aeson.parseEither jsonToReplay json
 
 -- | Encodes a binary replay. This is the opposite of 'replayFromBinary'.
-replayToBinary :: Replay -> Bytes.ByteString
+replayToBinary :: Replay -> ByteString.ByteString
 replayToBinary = builderToByteString . replayToBytes
 
 
@@ -277,7 +277,7 @@ sectionToBytes :: (a -> Builder.Builder) -> Section a -> Builder.Builder
 sectionToBytes encode section =
   let bytes = builderToByteString . encode $ fromSection section
   in
-    word32ToBytes (intToWord32 $ Bytes.length bytes)
+    word32ToBytes (intToWord32 $ ByteString.length bytes)
     <> word32ToBytes (crc32Bytes crc32Table crc32Initial bytes)
     <> Builder.byteString bytes
 
@@ -447,7 +447,7 @@ propertyToBytes property = case property of
         $ vectorToBytes (hashMapToBytes propertyToBytes) vector
     in
       textToBytes "ArrayProperty"
-      <> word64ToBytes (intToWord64 $ Bytes.length bytes)
+      <> word64ToBytes (intToWord64 $ ByteString.length bytes)
       <> Builder.byteString bytes
   PropertyBool bool ->
     textToBytes "BoolProperty" <> word64ToBytes 0 <> boolToBytes bool
@@ -455,7 +455,7 @@ propertyToBytes property = case property of
     let bytes = builderToByteString $ textToBytes value
     in
       textToBytes "ByteProperty"
-      <> word64ToBytes (intToWord64 $ Bytes.length bytes)
+      <> word64ToBytes (intToWord64 $ ByteString.length bytes)
       <> textToBytes key
       <> Builder.byteString bytes
   PropertyFloat float ->
@@ -466,7 +466,7 @@ propertyToBytes property = case property of
     let bytes = builderToByteString $ textToBytes text
     in
       textToBytes "NameProperty"
-      <> word64ToBytes (intToWord64 $ Bytes.length bytes)
+      <> word64ToBytes (intToWord64 $ ByteString.length bytes)
       <> Builder.byteString bytes
   PropertyQWord word64 ->
     textToBytes "QWordProperty" <> word64ToBytes 8 <> word64ToBytes word64
@@ -474,7 +474,7 @@ propertyToBytes property = case property of
     let bytes = builderToByteString $ textToBytes text
     in
       textToBytes "StrProperty"
-      <> word64ToBytes (intToWord64 $ Bytes.length bytes)
+      <> word64ToBytes (intToWord64 $ ByteString.length bytes)
       <> Builder.byteString bytes
 
 jsonToProperty :: Aeson.Value -> Aeson.Parser Property
@@ -655,12 +655,12 @@ keyFrameToJson keyFrame =
 -- TODO
 -- | This is a placeholder until the frames can actually be handled.
 newtype Frames
-  = Frames Bytes.ByteString
+  = Frames ByteString.ByteString
 
-toFrames :: Bytes.ByteString -> Frames
+toFrames :: ByteString.ByteString -> Frames
 toFrames = Frames
 
-fromFrames :: Frames -> Bytes.ByteString
+fromFrames :: Frames -> ByteString.ByteString
 fromFrames (Frames bytes) = bytes
 
 bytesToFrames :: Binary.Get Frames
@@ -669,11 +669,11 @@ bytesToFrames = do
   toFrames <$> Binary.getByteString (word32ToInt size)
 
 framesToBytes :: Frames -> Builder.Builder
-framesToBytes frames
-  = let bytes = fromFrames frames
-    in
-      word32ToBytes (intToWord32 $ Bytes.length bytes)
-        <> Builder.byteString bytes
+framesToBytes frames =
+  let bytes = fromFrames frames
+  in
+    word32ToBytes (intToWord32 $ ByteString.length bytes)
+      <> Builder.byteString bytes
 
 jsonToFrames :: Aeson.Value -> Aeson.Parser Frames
 jsonToFrames =
@@ -988,13 +988,13 @@ textToBytes text
         then
           let bytes = encodeLatin1 textWithNull
           in
-            int32ToBytes (intToInt32 $ Bytes.length bytes)
+            int32ToBytes (intToInt32 $ ByteString.length bytes)
               <> Builder.byteString bytes
         else
           let bytes = Text.encodeUtf16LE textWithNull
           in
             int32ToBytes
-                (flip div 2 . negate . intToInt32 $ Bytes.length bytes)
+                (flip div 2 . negate . intToInt32 $ ByteString.length bytes)
               <> Builder.byteString bytes
 
 jsonToText :: Aeson.Value -> Aeson.Parser Text.Text
@@ -1023,21 +1023,21 @@ vectorToJson :: (a -> Aeson.Encoding) -> Vector.Vector a -> Aeson.Encoding
 vectorToJson encode = Aeson.list encode . Vector.toList
 
 
-getInput :: Maybe FilePath -> IO Bytes.ByteString
-getInput = maybe Bytes.getContents Bytes.readFile
+getInput :: Maybe FilePath -> IO ByteString.ByteString
+getInput = maybe ByteString.getContents ByteString.readFile
 
-decodeWith :: Mode -> Bytes.ByteString -> Either String Replay
+decodeWith :: Mode -> ByteString.ByteString -> Either String Replay
 decodeWith mode = case mode of
   ModeDecode -> replayFromBinary
   ModeEncode -> replayFromJson
 
-encodeWith :: Mode -> Replay -> Bytes.ByteString
+encodeWith :: Mode -> Replay -> ByteString.ByteString
 encodeWith mode = case mode of
   ModeDecode -> replayToJson
   ModeEncode -> replayToBinary
 
-putOutput :: Maybe FilePath -> Bytes.ByteString -> IO ()
-putOutput = maybe Bytes.putStr Bytes.writeFile
+putOutput :: Maybe FilePath -> ByteString.ByteString -> IO ()
+putOutput = maybe ByteString.putStr ByteString.writeFile
 
 
 data Config = Config
@@ -1204,16 +1204,16 @@ printVersionAndExit :: IO a
 printVersionAndExit = dieLn version
 
 version :: String
-version = Version.showVersion Package.version
+version = Version.showVersion This.version
 
 
 crc32Bytes
   :: Vector.Vector Word.Word32
   -> Word.Word32
-  -> Bytes.ByteString
+  -> ByteString.ByteString
   -> Word.Word32
-crc32Bytes table initial =
-  Bits.complement . Bytes.foldl' (crc32Update table) (Bits.complement initial)
+crc32Bytes table initial = Bits.complement
+  . ByteString.foldl' (crc32Update table) (Bits.complement initial)
 
 crc32Initial :: Word.Word32
 crc32Initial = 0xefcbf201
@@ -1488,8 +1488,8 @@ crc32Update table crc byte = do
   Bits.xor left right
 
 
-builderToByteString :: Builder.Builder -> Bytes.ByteString
-builderToByteString = LazyBytes.toStrict . Builder.toLazyByteString
+builderToByteString :: Builder.Builder -> ByteString.ByteString
+builderToByteString = LazyByteString.toStrict . Builder.toLazyByteString
 
 dieLn :: String -> IO a
 dieLn = Exit.die
@@ -1499,7 +1499,7 @@ die message = do
   warn message
   Exit.exitFailure
 
-encodeLatin1 :: Text.Text -> Bytes.ByteString
+encodeLatin1 :: Text.Text -> ByteString.ByteString
 encodeLatin1 = Latin1.pack . Text.unpack
 
 floatToWord32 :: Float -> Word.Word32
@@ -1538,11 +1538,11 @@ requiredKey decode object key = do
   json <- object Aeson..: key
   decode json
 
-runGet :: Binary.Get a -> Bytes.ByteString -> Either String a
+runGet :: Binary.Get a -> ByteString.ByteString -> Either String a
 runGet decode =
   either (Left . third) (Right . third)
     . Binary.runGetOrFail decode
-    . LazyBytes.fromStrict
+    . LazyByteString.fromStrict
 
 third :: (a, b, c) -> c
 third (_, _, c) = c

@@ -14,11 +14,11 @@
   - { name: Data.Binary.Get, as: Binary }
   - { name: Data.Bits, as: Bits }
   - { name: Data.Bool, as: Bool }
-  - { name: Data.ByteString, as: Bytes }
+  - { name: Data.ByteString, as: ByteString }
   - { name: Data.ByteString.Base64, as: Base64 }
   - { name: Data.ByteString.Builder, as: Builder }
   - { name: Data.ByteString.Char8, as: Latin1 }
-  - { name: Data.ByteString.Lazy, as: LazyBytes }
+  - { name: Data.ByteString.Lazy, as: LazyByteString }
   - { name: Data.Char, as: Char }
   - { name: Data.HashMap.Strict, as: HashMap }
   - { name: Data.Int, as: Int }
@@ -30,7 +30,7 @@
   - { name: Data.Version, as: Version }
   - { name: Data.Word, as: Word }
   - { name: Endo, as: Endo }
-  - { name: Paths_endo, as: Package }
+  - { name: Paths_endo, as: This }
   - { name: System.Clock, as: Clock }
   - { name: System.Console.GetOpt, as: Console }
   - { name: System.Environment, as: Environment }
