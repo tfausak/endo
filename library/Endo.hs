@@ -265,7 +265,7 @@ bytesToSection decode = do
   expectedCrc <- bytesToWord32
   bytes <- Binary.getByteString $ word32ToInt size
   let actualCrc = crc32Bytes crc32Table crc32Initial bytes
-  Monad.when (actualCrc /= expectedCrc)
+  Monad.unless (actualCrc == expectedCrc)
     . fail
     $ "actual CRC "
     <> show actualCrc
