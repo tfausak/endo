@@ -210,8 +210,8 @@ replayToJson =
 -- converting from JSON and then back to JSON /is/ guaranteed to give you back
 -- what you started with (unlike 'replayFromBinary').
 replayFromJson :: ByteString.ByteString -> Either String Replay
-replayFromJson bytes = do
-  json <- Aeson.eitherDecodeStrict bytes
+replayFromJson byteString = do
+  json <- Aeson.eitherDecodeStrict byteString
   Aeson.parseEither jsonToReplay json
 
 -- | Encodes a binary replay. This is the opposite of 'replayFromBinary'.
@@ -266,23 +266,23 @@ getSection :: Bytes.Get a -> Bytes.Get (Section a)
 getSection decode = do
   size <- getWord32
   expectedCrc <- getWord32
-  bytes <- Bytes.getByteString $ word32ToInt size
-  let actualCrc = crc32Bytes crc32Table crc32Initial bytes
+  byteString <- Bytes.getByteString $ word32ToInt size
+  let actualCrc = crc32Bytes crc32Table crc32Initial byteString
   Monad.unless (actualCrc == expectedCrc)
     . fail
     $ "actual CRC "
     <> show actualCrc
     <> " does not match expected CRC "
     <> show expectedCrc
-  toSection <$> either fail pure (runGet decode bytes)
+  toSection <$> either fail pure (runGet decode byteString)
 
 putSection :: (a -> Builder.Builder) -> Section a -> Builder.Builder
 putSection encode section =
-  let bytes = builderToByteString . encode $ fromSection section
+  let byteString = builderToByteString . encode $ fromSection section
   in
-    putWord32 (intToWord32 $ ByteString.length bytes)
-    <> putWord32 (crc32Bytes crc32Table crc32Initial bytes)
-    <> Builder.byteString bytes
+    putWord32 (intToWord32 $ ByteString.length byteString)
+    <> putWord32 (crc32Bytes crc32Table crc32Initial byteString)
+    <> Builder.byteString byteString
 
 jsonToSection
   :: (Aeson.Value -> Aeson.Parser a) -> Aeson.Value -> Aeson.Parser (Section a)
@@ -445,36 +445,37 @@ putProperty :: Property -> Builder.Builder
 putProperty property = case property of
   PropertyArray vector ->
     let
-      bytes = builderToByteString $ putVector (putHashMap putProperty) vector
+      byteString =
+        builderToByteString $ putVector (putHashMap putProperty) vector
     in
       putText "ArrayProperty"
-      <> putWord64 (intToWord64 $ ByteString.length bytes)
-      <> Builder.byteString bytes
+      <> putWord64 (intToWord64 $ ByteString.length byteString)
+      <> Builder.byteString byteString
   PropertyBool bool -> putText "BoolProperty" <> putWord64 0 <> putBool bool
   PropertyByte key value ->
-    let bytes = builderToByteString $ putText value
+    let byteString = builderToByteString $ putText value
     in
       putText "ByteProperty"
-      <> putWord64 (intToWord64 $ ByteString.length bytes)
+      <> putWord64 (intToWord64 $ ByteString.length byteString)
       <> putText key
-      <> Builder.byteString bytes
+      <> Builder.byteString byteString
   PropertyFloat float ->
     putText "FloatProperty" <> putWord64 4 <> putFloat float
   PropertyInt int32 -> putText "IntProperty" <> putWord64 4 <> putInt32 int32
   PropertyName text ->
-    let bytes = builderToByteString $ putText text
+    let byteString = builderToByteString $ putText text
     in
       putText "NameProperty"
-      <> putWord64 (intToWord64 $ ByteString.length bytes)
-      <> Builder.byteString bytes
+      <> putWord64 (intToWord64 $ ByteString.length byteString)
+      <> Builder.byteString byteString
   PropertyQWord word64 ->
     putText "QWordProperty" <> putWord64 8 <> putWord64 word64
   PropertyStr text ->
-    let bytes = builderToByteString $ putText text
+    let byteString = builderToByteString $ putText text
     in
       putText "StrProperty"
-      <> putWord64 (intToWord64 $ ByteString.length bytes)
-      <> Builder.byteString bytes
+      <> putWord64 (intToWord64 $ ByteString.length byteString)
+      <> Builder.byteString byteString
 
 jsonToProperty :: Aeson.Value -> Aeson.Parser Property
 jsonToProperty = Aeson.withObject "Property" $ \object -> do
@@ -557,7 +558,7 @@ getContent header = do
   levels <- getVector getText
   keyFrames <- getVector getKeyFrame
   size <- getWord32
-  bytes <- Bytes.getByteString $ word32ToInt size
+  byteString <- Bytes.getByteString $ word32ToInt size
   messages <- getVector getMessage
   marks <- getVector getMark
   packages <- getVector getText
@@ -565,7 +566,7 @@ getContent header = do
   names <- getVector getText
   classMappings <- getVector getClassMapping
   caches <- getVector getCache
-  frames <- getFrames header bytes
+  frames <- getFrames header byteString
   pure $ Content
     levels
     keyFrames
@@ -675,14 +676,14 @@ getFrames header =
 putFrames :: Vector.Vector Frame -> Builder.Builder
 putFrames frames =
   let
-    bytes =
+    byteString =
       LazyByteString.toStrict
         . Bytes.runPut
         . Bits.runBitPut
         $ Foldable.traverse_ putFrame frames
   in
-    putWord32 (intToWord32 $ ByteString.length bytes)
-      <> Builder.byteString bytes
+    putWord32 (intToWord32 $ ByteString.length byteString)
+      <> Builder.byteString byteString
 
 jsonToFrames :: Aeson.Value -> Aeson.Parser (Vector.Vector Frame)
 jsonToFrames = jsonToVector jsonToFrame
@@ -1005,16 +1006,18 @@ putText text
     in
       if Text.all Char.isLatin1 textWithNull
         then
-          let bytes = encodeLatin1 textWithNull
+          let byteString = encodeLatin1 textWithNull
           in
-            putInt32 (intToInt32 $ ByteString.length bytes)
-              <> Builder.byteString bytes
+            putInt32 (intToInt32 $ ByteString.length byteString)
+              <> Builder.byteString byteString
         else
-          let bytes = Text.encodeUtf16LE textWithNull
+          let byteString = Text.encodeUtf16LE textWithNull
           in
             putInt32
-                (flip div 2 . negate . intToInt32 $ ByteString.length bytes)
-              <> Builder.byteString bytes
+                (flip div 2 . negate . intToInt32 $ ByteString.length
+                  byteString
+                )
+              <> Builder.byteString byteString
 
 jsonToText :: Aeson.Value -> Aeson.Parser Text.Text
 jsonToText = Aeson.parseJSON
