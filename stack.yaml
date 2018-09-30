@@ -1,2 +1,2 @@
 # https://github.com/commercialhaskell/stack
-resolver: lts-12.0
+resolver: nightly-2018-09-29
