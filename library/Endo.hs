@@ -37,10 +37,10 @@ module Endo
 where
 
 import qualified Control.Monad as Monad
+import qualified Control.Monad.Fail as Fail
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encoding as Aeson
 import qualified Data.Aeson.Types as Aeson
-import qualified Data.Binary as Bytes
 import qualified Data.Binary.Bits.Get as Bits
 import qualified Data.Binary.Bits.Put as Bits
 import qualified Data.Binary.Get as Bytes
@@ -228,7 +228,7 @@ data Replay = Replay
   , replayContent :: Section Content
   }
 
-getReplay :: Bytes.Get Replay
+getReplay :: Get Replay
 getReplay = do
   header <- getSection getHeader
   Replay header <$> getSection (getContent $ fromSection header)
@@ -262,11 +262,11 @@ toSection = Section
 fromSection :: Section a -> a
 fromSection (Section a) = a
 
-getSection :: Bytes.Get a -> Bytes.Get (Section a)
+getSection :: Get a -> Get (Section a)
 getSection decode = do
   size <- getWord32
   expectedCrc <- getWord32
-  byteString <- Bytes.getByteString $ word32ToInt size
+  byteString <- takeGet $ word32ToInt size
   let actualCrc = crc32Bytes crc32Table crc32Initial byteString
   Monad.unless (actualCrc == expectedCrc)
     . fail
@@ -351,7 +351,7 @@ data Header = Header
   -- 1v2.
   }
 
-getHeader :: Bytes.Get Header
+getHeader :: Get Header
 getHeader = do
   majorVersion <- getWord32
   minorVersion <- getWord32
@@ -411,14 +411,13 @@ data Property
   | PropertyQWord Word.Word64
   | PropertyStr Text.Text
 
-getProperty :: Bytes.Get Property
+getProperty :: Get Property
 getProperty = do
   kind <- getText
   size <- getWord64
   case kind of
-    "ArrayProperty" -> PropertyArray <$> Bytes.isolate
-      (word64ToInt size)
-      (getVector (getHashMap getProperty))
+    "ArrayProperty" -> PropertyArray
+      <$> isolateGet (word64ToInt size) (getVector (getHashMap getProperty))
     "BoolProperty" -> do
       Monad.unless (size == 0) . fail $ "invalid bool size: " <> show size
       PropertyBool <$> getBool
@@ -426,19 +425,18 @@ getProperty = do
       key <- getText
       if key == "OnlinePlatform_Steam"
         then pure $ PropertyByte "OnlinePlatform" key
-        else PropertyByte key <$> Bytes.isolate (word64ToInt size) getText
+        else PropertyByte key <$> isolateGet (word64ToInt size) getText
     "FloatProperty" -> do
       Monad.unless (size == 4) . fail $ "invalid float size: " <> show size
       PropertyFloat <$> getFloat
     "IntProperty" -> do
       Monad.unless (size == 4) . fail $ "invalid int size: " <> show size
       PropertyInt <$> getInt32
-    "NameProperty" ->
-      PropertyName <$> Bytes.isolate (word64ToInt size) getText
+    "NameProperty" -> PropertyName <$> isolateGet (word64ToInt size) getText
     "QWordProperty" -> do
       Monad.unless (size == 8) . fail $ "invalid qword size: " <> show size
       PropertyQWord <$> getWord64
-    "StrProperty" -> PropertyStr <$> Bytes.isolate (word64ToInt size) getText
+    "StrProperty" -> PropertyStr <$> isolateGet (word64ToInt size) getText
     _ -> fail $ "unknown property kind: " <> show kind
 
 putProperty :: Property -> Builder.Builder
@@ -553,12 +551,12 @@ data Content = Content
   -- ^ A list of classes along with their parent classes and attributes.
   }
 
-getContent :: Header -> Bytes.Get Content
+getContent :: Header -> Get Content
 getContent header = do
   levels <- getVector getText
   keyFrames <- getVector getKeyFrame
   size <- getWord32
-  byteString <- Bytes.getByteString $ word32ToInt size
+  byteString <- takeGet $ word32ToInt size
   messages <- getVector getMessage
   marks <- getVector getMark
   packages <- getVector getText
@@ -639,7 +637,7 @@ data KeyFrame = KeyFrame
   -- ^ The bit position of this key frame in the network stream.
   }
 
-getKeyFrame :: Bytes.Get KeyFrame
+getKeyFrame :: Get KeyFrame
 getKeyFrame = KeyFrame <$> getFloat <*> getWord32 <*> getWord32
 
 putKeyFrame :: KeyFrame -> Builder.Builder
@@ -663,15 +661,17 @@ keyFrameToJson keyFrame =
     <> toPair word32ToJson "position" (keyFramePosition keyFrame)
 
 
-getFrames :: Header -> ByteString.ByteString -> Bytes.Get (Vector.Vector Frame)
-getFrames header =
+getFrames :: Header -> ByteString.ByteString -> Get (Vector.Vector Frame)
+getFrames header byteString =
   let
     properties = headerProperties header
     numFrames = case HashMap.lookup "NumFrames" properties of
       Just (PropertyInt int32) -> int32ToInt int32
       _ -> 0
-  in either fail pure
-    . runGet (Bits.runBitGet $ Vector.replicateM numFrames getFrame)
+  in either (fail . third) (pure . third)
+    . Bytes.runGetOrFail
+        (Bits.runBitGet $ Vector.replicateM numFrames getFrame)
+    $ LazyByteString.fromStrict byteString
 
 putFrames :: Vector.Vector Frame -> Builder.Builder
 putFrames frames =
@@ -718,7 +718,7 @@ data Message = Message
   -- ^ The actual payload of the message.
   }
 
-getMessage :: Bytes.Get Message
+getMessage :: Get Message
 getMessage = Message <$> getWord32 <*> getText <*> getText
 
 putMessage :: Message -> Builder.Builder
@@ -749,7 +749,7 @@ data Mark = Mark
   -- ^ Which frame this mark belongs to, starting from 0.
   }
 
-getMark :: Bytes.Get Mark
+getMark :: Get Mark
 getMark = Mark <$> getText <*> getWord32
 
 putMark :: Mark -> Builder.Builder
@@ -775,7 +775,7 @@ data ClassMapping = ClassMapping
   , classMappingStreamId :: Word.Word32
   }
 
-getClassMapping :: Bytes.Get ClassMapping
+getClassMapping :: Get ClassMapping
 getClassMapping = ClassMapping <$> getText <*> getWord32
 
 putClassMapping :: ClassMapping -> Builder.Builder
@@ -803,7 +803,7 @@ data Cache = Cache
   , cacheAttributeMappings :: Vector.Vector AttributeMapping
   }
 
-getCache :: Bytes.Get Cache
+getCache :: Get Cache
 getCache =
   Cache
     <$> getWord32
@@ -846,7 +846,7 @@ data AttributeMapping = AttributeMapping
   , attributeMappingStreamId :: Word.Word32
   }
 
-getAttributeMapping :: Bytes.Get AttributeMapping
+getAttributeMapping :: Get AttributeMapping
 getAttributeMapping = AttributeMapping <$> getWord32 <*> getWord32
 
 putAttributeMapping :: AttributeMapping -> Builder.Builder
@@ -873,9 +873,9 @@ attributeMappingToJson attributeMapping =
          (attributeMappingStreamId attributeMapping)
 
 
-getBool :: Bytes.Get Bool
+getBool :: Get Bool
 getBool = do
-  byte <- Bytes.getWord8
+  byte <- getWord8
   case byte of
     0 -> pure False
     1 -> pure True
@@ -891,7 +891,7 @@ boolToJson :: Bool -> Aeson.Encoding
 boolToJson = Aeson.toEncoding
 
 
-getFloat :: Bytes.Get Float
+getFloat :: Get Float
 getFloat = word32ToFloat <$> getWord32
 
 putFloat :: Float -> Builder.Builder
@@ -904,13 +904,11 @@ floatToJson :: Float -> Aeson.Encoding
 floatToJson = Aeson.toEncoding
 
 
-getHashMap :: Bytes.Get v -> Bytes.Get (HashMap.HashMap Text.Text v)
+getHashMap :: Get v -> Get (HashMap.HashMap Text.Text v)
 getHashMap decode = getHashMapWith decode HashMap.empty
 
 getHashMapWith
-  :: Bytes.Get v
-  -> HashMap.HashMap Text.Text v
-  -> Bytes.Get (HashMap.HashMap Text.Text v)
+  :: Get v -> HashMap.HashMap Text.Text v -> Get (HashMap.HashMap Text.Text v)
 getHashMapWith decode hashMap = do
   key <- getText
   if key == "None"
@@ -936,8 +934,8 @@ hashMapToJson
 hashMapToJson encode = Aeson.dict Aeson.text encode HashMap.foldrWithKey
 
 
-getInt32 :: Bytes.Get Int.Int32
-getInt32 = Bytes.getInt32le
+getInt32 :: Get Int.Int32
+getInt32 = word32ToInt32 <$> getWord32
 
 putInt32 :: Int.Int32 -> Builder.Builder
 putInt32 = Builder.int32LE
@@ -949,7 +947,7 @@ int32ToJson :: Int.Int32 -> Aeson.Encoding
 int32ToJson = Aeson.toEncoding
 
 
-getMaybe :: Bytes.Get a -> Bool -> Bytes.Get (Maybe a)
+getMaybe :: Get a -> Bool -> Get (Maybe a)
 getMaybe decode condition =
   if condition then Just <$> decode else pure Nothing
 
@@ -966,8 +964,20 @@ maybeToJson :: (a -> Aeson.Encoding) -> Maybe a -> Aeson.Encoding
 maybeToJson = maybe Aeson.null_
 
 
-getWord32 :: Bytes.Get Word.Word32
-getWord32 = Bytes.getWord32le
+getWord8 :: Get Word.Word8
+getWord8 = do
+  byteString <- takeGet 1
+  pure $ ByteString.head byteString
+
+
+getWord32 :: Get Word.Word32
+getWord32 = do
+  x <- takeGet 4
+  pure
+    $ word8ToWord32 (ByteString.index x 0)
+    Bitwise..|. Bitwise.shiftL (word8ToWord32 (ByteString.index x 1)) 8
+    Bitwise..|. Bitwise.shiftL (word8ToWord32 (ByteString.index x 2)) 16
+    Bitwise..|. Bitwise.shiftL (word8ToWord32 (ByteString.index x 3)) 24
 
 putWord32 :: Word.Word32 -> Builder.Builder
 putWord32 = Builder.word32LE
@@ -979,8 +989,18 @@ word32ToJson :: Word.Word32 -> Aeson.Encoding
 word32ToJson = Aeson.toEncoding
 
 
-getWord64 :: Bytes.Get Word.Word64
-getWord64 = Bytes.getWord64le
+getWord64 :: Get Word.Word64
+getWord64 = do
+  x <- takeGet 8
+  pure
+    $ word8ToWord64 (ByteString.index x 0)
+    Bitwise..|. Bitwise.shiftL (word8ToWord64 (ByteString.index x 1)) 8
+    Bitwise..|. Bitwise.shiftL (word8ToWord64 (ByteString.index x 2)) 16
+    Bitwise..|. Bitwise.shiftL (word8ToWord64 (ByteString.index x 3)) 24
+    Bitwise..|. Bitwise.shiftL (word8ToWord64 (ByteString.index x 4)) 32
+    Bitwise..|. Bitwise.shiftL (word8ToWord64 (ByteString.index x 5)) 40
+    Bitwise..|. Bitwise.shiftL (word8ToWord64 (ByteString.index x 6)) 48
+    Bitwise..|. Bitwise.shiftL (word8ToWord64 (ByteString.index x 7)) 56
 
 putWord64 :: Word.Word64 -> Builder.Builder
 putWord64 = Builder.word64LE
@@ -992,13 +1012,13 @@ word64ToJson :: Word.Word64 -> Aeson.Encoding
 word64ToJson = Aeson.toEncoding
 
 
-getText :: Bytes.Get Text.Text
+getText :: Get Text.Text
 getText = do
   rawSize <- getInt32
   let size = if rawSize == 0x05000000 then 8 else rawSize
   Text.filter (/= '\x00') <$> if size < 0
-    then Text.decodeUtf16LE <$> Bytes.getByteString (-2 * int32ToInt size)
-    else Text.decodeLatin1 <$> Bytes.getByteString (int32ToInt size)
+    then Text.decodeUtf16LE <$> takeGet (-2 * int32ToInt size)
+    else Text.decodeLatin1 <$> takeGet (int32ToInt size)
 
 putText :: Text.Text -> Builder.Builder
 putText text
@@ -1026,7 +1046,7 @@ textToJson :: Text.Text -> Aeson.Encoding
 textToJson = Aeson.toEncoding
 
 
-getVector :: Bytes.Get a -> Bytes.Get (Vector.Vector a)
+getVector :: Get a -> Get (Vector.Vector a)
 getVector decode = do
   size <- getWord32
   Vector.replicateM (word32ToInt size) decode
@@ -1043,6 +1063,80 @@ jsonToVector = Aeson.withArray "Vector" . mapM
 
 vectorToJson :: (a -> Aeson.Encoding) -> Vector.Vector a -> Aeson.Encoding
 vectorToJson encode = Aeson.list encode . Vector.toList
+
+
+newtype Get a
+  = Get (ByteString.ByteString -> Either String (ByteString.ByteString, a))
+
+unwrapGet
+  :: Get a -> ByteString.ByteString -> Either String (ByteString.ByteString, a)
+unwrapGet (Get f) = f
+
+instance Functor Get where
+  fmap = mapGet
+
+mapGet :: (a -> b) -> Get a -> Get b
+mapGet f g = Get $ \b1 -> case unwrapGet g b1 of
+  Left e -> Left e
+  Right (b2, x) -> Right (b2, f x)
+
+instance Applicative Get where
+  pure = pureGet
+  (<*>) = applyGet
+
+pureGet :: a -> Get a
+pureGet x = Get $ \b -> Right (b, x)
+
+applyGet :: Get (a -> b) -> Get a -> Get b
+applyGet gf gx = Get $ \b1 -> case unwrapGet gf b1 of
+  Left e -> Left e
+  Right (b2, f) -> case unwrapGet gx b2 of
+    Left e -> Left e
+    Right (b3, x) -> Right (b3, f x)
+
+instance Monad Get where
+  (>>=) = bindGet
+  fail = Fail.fail
+
+bindGet :: Get a -> (a -> Get b) -> Get b
+bindGet gx f = Get $ \b1 -> case unwrapGet gx b1 of
+  Left e -> Left e
+  Right (b2, x) -> unwrapGet (f x) b2
+
+instance Fail.MonadFail Get where
+  fail = failGet
+
+failGet :: String -> Get a
+failGet = Get . const . Left
+
+askGet :: Get ByteString.ByteString
+askGet = Get $ \b -> Right (b, b)
+
+tellGet :: ByteString.ByteString -> Get ()
+tellGet b = Get . const $ Right (b, ())
+
+takeGet :: Int -> Get ByteString.ByteString
+takeGet size = do
+  Monad.when (size < 0) . fail $ "size too small: " <> show size
+  before <- askGet
+  Monad.when (size > ByteString.length before)
+    . fail
+    $ "size too big: "
+    <> show size
+  let (byteString, after) = ByteString.splitAt size before
+  tellGet after
+  pure byteString
+
+isolateGet :: Int -> Get a -> Get a
+isolateGet size get = do
+  byteString <- takeGet size
+  either fail pure $ runGet get byteString
+
+runGet :: Get a -> ByteString.ByteString -> Either String a
+runGet get byteString = case unwrapGet get byteString of
+  Left e -> Left e
+  Right (leftover, x) ->
+    if ByteString.null leftover then Right x else Left "bytes left over"
 
 
 getInput :: Maybe FilePath -> IO ByteString.ByteString
@@ -1561,12 +1655,6 @@ requiredKey decode object key = do
   json <- object Aeson..: key
   decode json
 
-runGet :: Bytes.Get a -> ByteString.ByteString -> Either String a
-runGet decode =
-  either (Left . third) (Right . third)
-    . Bytes.runGetOrFail decode
-    . LazyByteString.fromStrict
-
 third :: (a, b, c) -> c
 third (_, _, c) = c
 
@@ -1585,11 +1673,20 @@ word32ToFloat = Unsafe.unsafeCoerce
 word8ToInt :: Word.Word8 -> Int
 word8ToInt = fromIntegral
 
+word8ToWord32 :: Word.Word8 -> Word.Word32
+word8ToWord32 = fromIntegral
+
+word8ToWord64 :: Word.Word8 -> Word.Word64
+word8ToWord64 = fromIntegral
+
 word32ToInt :: Word.Word32 -> Int
 word32ToInt = fromIntegral
 
 word32ToWord8 :: Word.Word32 -> Word.Word8
 word32ToWord8 = fromIntegral
+
+word32ToInt32 :: Word.Word32 -> Int.Int32
+word32ToInt32 = fromIntegral
 
 word64ToInt :: Word.Word64 -> Int
 word64ToInt = fromIntegral
