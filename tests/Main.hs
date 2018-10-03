@@ -147,7 +147,7 @@ test directory (name, description) = do
     description
 
   Printf.printf
-    "%4s  %7db  %8db  %3dx  %8dns  %4.1fmbps  %7db  %5.3fx  %8db  %3dx  %8dns  %4.1fmbps\n"
+    "%4s  %7db  %8db  %3dx  %8dns  %5.1fmbps  %5db  %5.3fx  %8db  %3dx  %8dns  %5.1fmbps\n"
     name
     originalReplaySize
     decodeCount
