@@ -1,0 +1,62 @@
+cabal-version: 2.4
+-- https://cabal.readthedocs.io/en/latest/developing-packages.html#package-descriptions
+
+name: endo
+version: 0.0.0
+
+category: Game
+description: Endo parses and generates Rocket League replays.
+license-file: LICENSE.markdown
+license: MIT
+maintainer: Taylor Fausak
+synopsis: Parse and generate Rocket League replays.
+
+common lib
+  build-depends:
+    aeson ^>= 1.4.1,
+    base ^>= 4.12.0,
+    binary ^>= 0.8.6,
+    binary-bits ^>= 0.5,
+    bytestring ^>= 0.10.8,
+    text ^>= 1.2.3,
+    unordered-containers ^>= 0.2.9,
+    vector ^>= 0.12.0,
+  default-language: Haskell2010
+  ghc-options:
+    -Weverything
+    -Wno-all-missed-specializations
+    -Wno-implicit-prelude
+    -Wno-missing-exported-signatures
+    -Wno-safe
+    -Wno-unsafe
+
+common bin
+  import: lib
+
+  build-depends: endo
+  ghc-options: -rtsopts -threaded
+
+library
+  import: lib
+
+  autogen-modules: Paths_endo
+  exposed-modules: Endo
+  hs-source-dirs: library
+  other-modules: Paths_endo
+
+executable endo
+  import: bin
+
+  hs-source-dirs: executables
+  main-is: Main.hs
+
+test-suite test
+  import: bin
+
+  build-depends:
+    clock ^>= 0.7.2,
+    filepath ^>= 1.4.2,
+    temporary ^>= 1.3,
+  hs-source-dirs: tests
+  main-is: Main.hs
+  type: exitcode-stdio-1.0
