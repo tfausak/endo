@@ -6,8 +6,9 @@ where
 import qualified Control.Monad as Monad
 import qualified Data.ByteString as Bytes
 import qualified Data.Int as Int
+import qualified Data.Word as Word
 import qualified Endo
-import qualified System.Clock as Clock
+import qualified GHC.Clock as Clock
 import qualified System.Exit as Exit
 import qualified System.FilePath as FilePath
 import qualified System.IO as IO
@@ -123,7 +124,7 @@ mainWith directory = do
   IO.hPutStrLn IO.stderr $ Printf.printf
     "Tested %d replays in %.1f seconds."
     (length replays)
-    (nanosecondsToSeconds . integerToDouble $ Clock.toNanoSecs elapsed)
+    (nanosecondsToSeconds $ word64ToDouble elapsed)
 
 test :: FilePath -> (String, String) -> IO ()
 test directory (name, description) = do
@@ -147,23 +148,23 @@ test directory (name, description) = do
     description
 
   Printf.printf
-    "%4s  %7db  %8db  %3dx  %8dns  %5.1fmbps  %5db  %5.3fx  %8db  %3dx  %8dns  %5.1fmbps\n"
+    "%4s  %7db  %9db  %4dx  %9dns  %5.1fmbps  %5db  %5.3fx  %9db  %4dx  %9dns  %5.1fmbps\n"
     name
     originalReplaySize
     decodeCount
     (div decodeCount $ intToInt64 originalReplaySize)
-    (Clock.toNanoSecs decodeTime)
+    decodeTime
     (mbps originalReplaySize decodeTime)
     originalJsonSize
     (fromIntegral originalJsonSize / fromIntegral originalReplaySize :: Float)
     encodeCount
     (div encodeCount $ intToInt64 originalReplaySize)
-    (Clock.toNanoSecs encodeTime)
+    encodeTime
     (mbps originalReplaySize encodeTime)
 
-mbps :: Int -> Clock.TimeSpec -> Double
+mbps :: Int -> Word.Word64 -> Double
 mbps bytes elapsed = bytesToMegabytes (intToDouble bytes)
-  / nanosecondsToSeconds (integerToDouble $ Clock.toNanoSecs elapsed)
+  / nanosecondsToSeconds (word64ToDouble elapsed)
 
 bytesToMegabytes :: Double -> Double
 bytesToMegabytes = (/ (1024 * 1024))
@@ -196,12 +197,12 @@ withAllocationCount action = do
   after <- Mem.getAllocationCounter
   pure (result, before - after)
 
-withTime :: IO a -> IO (a, Clock.TimeSpec)
+withTime :: IO a -> IO (a, Word.Word64)
 withTime action = do
-  before <- Clock.getTime Clock.Monotonic
+  before <- Clock.getMonotonicTimeNSec
   result <- action
-  after <- Clock.getTime Clock.Monotonic
-  pure (result, Clock.diffTimeSpec before after)
+  after <- Clock.getMonotonicTimeNSec
+  pure (result, after - before)
 
 intToInt64 :: Int -> Int.Int64
 intToInt64 = fromIntegral
@@ -209,5 +210,5 @@ intToInt64 = fromIntegral
 intToDouble :: Int -> Double
 intToDouble = fromIntegral
 
-integerToDouble :: Integer -> Double
-integerToDouble = fromIntegral
+word64ToDouble :: Word.Word64 -> Double
+word64ToDouble = fromIntegral
