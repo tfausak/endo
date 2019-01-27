@@ -22,7 +22,9 @@ module Endo
   , replayFromJson
   , replayToBinary
   , Replay(..)
-  , Section(..)
+  , Section
+  , toSection
+  , fromSection
   , Header(..)
   , Property(..)
   , Content(..)
@@ -87,29 +89,20 @@ import qualified Unsafe.Coerce as Unsafe
 --     If you're looking for replay files on your machine, they can be found in
 --     the following directories:
 --
---     [Windows]: [ ](#haddock-requires-something-here)
+--     - Windows:
+--       @%UserProfile%\\Documents\\My Games\\Rocket League\\TAGame\\Demos@.
+--       For example:
+--       @C:\\Users\\endo\\Documents\\My Games\\Rocket League\\TAGame\\Demos@
 --
---         > %UserProfile%\Documents\My Games\Rocket League\TAGame\Demos
+--     - MacOS:
+--       @$HOME\/Library\/Application Support\/Rocket League\/TAGame\/Demos@
+--       For example:
+--       @\/Users\/endo\/Library\/Application Support\/Rocket League\/TAGame\/Demos@
 --
---         For example:
---
---         > C:\Users\Taylor\Documents\My Games\Rocket League\TAGame\Demos
---
---     [MacOS]: [ ](#haddock-requires-something-here)
---
---         > $HOME/Library/Application Support/Rocket League/TAGame/Demos
---
---         For example:
---
---         > /Users/taylor/Library/Application Support/Rocket League/TAGame/Demos
---
---     [Linux]: [ ](#haddock-requires-something-here)
---
---         > $HOME/.local/share/Rocket League/TAGame/Demos
---
---         For example:
---
---         > /home/taylor/.local/share/Rocket League/TAGame/Demos
+--     - Linux:
+--       @$HOME\/.local\/share\/Rocket League\/TAGame\/Demos@
+--       For example:
+--       @\/home\/endo\/.local\/share\/Rocket League\/TAGame\/Demos@
 --
 -- [@--output FILE@, @-o FILE@] Specifies the output file. If this option is
 -- not given, output will be written to 'IO.stdout'.
@@ -256,9 +249,12 @@ replayToJson_ replay =
 newtype Section a
   = Section a
 
+-- | Wraps a value in a section. This is the opposite of 'fromSection'.
 toSection :: a -> Section a
 toSection = Section
 
+-- | Unwraps a section to give you back the original value. This is the
+-- opposite of 'toSection'.
 fromSection :: Section a -> a
 fromSection (Section a) = a
 
@@ -328,7 +324,7 @@ data Header = Header
   -- values are: @\"Online\"@, @\"Offline\"@, @\"Private\"@, and @\"Season\"@.
   --
   -- [@\"NumFrames\"@] This 'PropertyInt' is used to calculate the length of
-  -- the match. There are 30 frames per second, a typical 5-minute match has
+  -- the match. There are 30 frames per second. A typical 5-minute match has
   -- about 9,000 frames.
   --
   -- [@\"PrimaryPlayerTeam\"@] This is an 'PropertyInt'. It is either 0 (blue)
@@ -401,13 +397,18 @@ hasPatchVersion majorVersion minorVersion =
 -- information like the player names and the information on their scoreboards.
 data Property
   = PropertyArray (Vector.Vector (HashMap.HashMap Text.Text Property))
+  -- ^ Instead of having separate array and dictionary types, all arrays
+  -- contain dictionaries.
   | PropertyBool Bool
   | PropertyByte Text.Text Text.Text
+  -- ^ This is a confusing name for what is essentially a key-value pair. Note
+  -- that the value is always 'Text.Text' rather than a 'Property' like you
+  -- might expect.
   | PropertyFloat Float
   | PropertyInt Int.Int32
   | PropertyName Text.Text
   -- ^ Names are like strings except that they show up in the list of names in
-  -- the content. It's not clear what this means exactly.
+  -- the content. It's not clear what this means exactly. (See 'contentNames'.)
   | PropertyQWord Word.Word64
   | PropertyStr Text.Text
 
@@ -537,12 +538,12 @@ data Content = Content
   -- ^ Ticks marks shown on the scrubber when watching a replay.
   , contentPackages :: Vector.Vector Text.Text
   -- ^ A list of @.upk@ files to load, like
-  -- @"..\..\TAGame\CookedPCConsole\Stadium_P.upk"@.
+  -- @"..\\..\\TAGame\\CookedPCConsole\\Stadium_P.upk"@.
   , contentObjects :: Vector.Vector Text.Text
   -- ^ Objects in the stream.
   , contentNames :: Vector.Vector Text.Text
   -- ^ It's not clear what these are used for. This list is usually not empty,
-  -- but appears unused otherwise.
+  -- but appears unused otherwise. (See 'PropertyName'.)
   , contentClassMappings :: Vector.Vector ClassMapping
   -- ^ A mapping between classes and their ID in the stream.
   , contentCaches :: Vector.Vector Cache
@@ -690,7 +691,7 @@ framesToJson :: Vector.Vector Frame -> Aeson.Encoding
 framesToJson = vectorToJson frameToJson
 
 
--- TODO
+-- | TODO
 data Frame = Frame
 
 getFrame :: Bits.BitGet Frame
@@ -706,7 +707,7 @@ frameToJson :: Frame -> Aeson.Encoding
 frameToJson _ = Aeson.pairs mempty
 
 
--- | A debug message.
+-- | A debug message. These only exist in very old replays.
 data Message = Message
   { messageFrame :: Word.Word32
   -- ^ Which frame this message belongs to.
@@ -768,6 +769,7 @@ markToJson mark =
     (markFrame mark)
 
 
+-- | TODO
 data ClassMapping = ClassMapping
   { classMappingName :: Text.Text
   , classMappingStreamId :: Word.Word32
@@ -794,6 +796,7 @@ classMappingToJson classMapping =
     <> toPair word32ToJson "streamId" (classMappingStreamId classMapping)
 
 
+-- | TODO
 data Cache = Cache
   { cacheClassId :: Word.Word32
   , cacheParentCacheId :: Word.Word32
@@ -839,6 +842,7 @@ cacheToJson cache =
          (cacheAttributeMappings cache)
 
 
+-- | TODO
 data AttributeMapping = AttributeMapping
   { attributeMappingObjectId :: Word.Word32
   , attributeMappingStreamId :: Word.Word32
