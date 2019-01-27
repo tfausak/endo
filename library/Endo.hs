@@ -55,9 +55,9 @@ import qualified Data.ByteString.Char8 as Latin1
 import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.Char as Char
 import qualified Data.Foldable as Foldable
-import qualified Data.HashMap.Strict as HashMap
 import qualified Data.Int as Int
 import qualified Data.List as List
+import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -305,7 +305,7 @@ data Header = Header
   -- ^ The label, which is always @\"TAGame.Replay_Soccar_TA\"@. This is most
   -- likely a [magic number](https://en.wikipedia.org/wiki/Magic_number_\(programming\))
   -- for the replay file format.
-  , headerProperties :: HashMap.HashMap Text.Text Property
+  , headerProperties :: Map.Map Text.Text Property
   -- ^ These properties determine how a replay will look in the list of replays
   -- in-game. One element is required for the replay to show up:
   --
@@ -354,7 +354,7 @@ getHeader = do
   Header majorVersion minorVersion
     <$> getMaybe getWord32 (hasPatchVersion majorVersion minorVersion)
     <*> getText
-    <*> getHashMap getProperty
+    <*> getMap getProperty
 
 putHeader :: Header -> Put
 putHeader header =
@@ -362,7 +362,7 @@ putHeader header =
     <> putWord32 (headerMinorVersion header)
     <> putMaybe putWord32 (headerPatchVersion header)
     <> putText (headerLabel header)
-    <> putHashMap putProperty (headerProperties header)
+    <> putMap putProperty (headerProperties header)
 
 jsonToHeader :: Aeson.Value -> Aeson.Parser Header
 jsonToHeader = Aeson.withObject "Header" $ \object ->
@@ -371,7 +371,7 @@ jsonToHeader = Aeson.withObject "Header" $ \object ->
     <*> requiredKey jsonToWord32 object "minorVersion"
     <*> optionalKey jsonToWord32 object "patchVersion"
     <*> requiredKey jsonToText object "label"
-    <*> requiredKey (jsonToHashMap jsonToProperty) object "properties"
+    <*> requiredKey (jsonToMap jsonToProperty) object "properties"
 
 headerToJson :: Header -> Aeson.Encoding
 headerToJson header =
@@ -384,7 +384,7 @@ headerToJson header =
          (headerPatchVersion header)
     <> toPair textToJson "label" (headerLabel header)
     <> toPair
-         (hashMapToJson propertyToJson)
+         (mapToJson propertyToJson)
          "properties"
          (headerProperties header)
 
@@ -396,7 +396,7 @@ hasPatchVersion majorVersion minorVersion =
 -- | Properties are given in the header and usually describe high-level game
 -- information like the player names and the information on their scoreboards.
 data Property
-  = PropertyArray (Vector.Vector (HashMap.HashMap Text.Text Property))
+  = PropertyArray (Vector.Vector (Map.Map Text.Text Property))
   -- ^ Instead of having separate array and dictionary types, all arrays
   -- contain dictionaries.
   | PropertyBool Bool
@@ -418,7 +418,7 @@ getProperty = do
   size <- getWord64
   case kind of
     "ArrayProperty" -> PropertyArray
-      <$> isolateGet (word64ToInt size) (getVector (getHashMap getProperty))
+      <$> isolateGet (word64ToInt size) (getVector (getMap getProperty))
     "BoolProperty" -> do
       Monad.unless (size == 0) . fail $ "invalid bool size: " <> show size
       PropertyBool <$> getBool
@@ -443,7 +443,7 @@ getProperty = do
 putProperty :: Property -> Put
 putProperty property = case property of
   PropertyArray vector ->
-    let byteString = runPut $ putVector (putHashMap putProperty) vector
+    let byteString = runPut $ putVector (putMap putProperty) vector
     in
       putText "ArrayProperty"
       <> putWord64 (intToWord64 $ ByteString.length byteString)
@@ -479,7 +479,7 @@ jsonToProperty = Aeson.withObject "Property" $ \object -> do
   kind <- requiredKey jsonToText object "kind"
   case kind of
     "array" -> PropertyArray <$> requiredKey
-      (jsonToVector $ jsonToHashMap jsonToProperty)
+      (jsonToVector $ jsonToMap jsonToProperty)
       object
       "value"
     "bool" -> PropertyBool <$> requiredKey jsonToBool object "value"
@@ -499,7 +499,7 @@ propertyToJson :: Property -> Aeson.Encoding
 propertyToJson property = Aeson.pairs $ case property of
   PropertyArray vector ->
     toPair textToJson "kind" "array"
-      <> toPair (vectorToJson $ hashMapToJson propertyToJson) "value" vector
+      <> toPair (vectorToJson $ mapToJson propertyToJson) "value" vector
   PropertyBool bool ->
     toPair textToJson "kind" "bool" <> toPair boolToJson "value" bool
   PropertyByte key value ->
@@ -664,7 +664,7 @@ getFrames :: Header -> ByteString.ByteString -> Get (Vector.Vector Frame)
 getFrames header byteString =
   let
     properties = headerProperties header
-    numFrames = case HashMap.lookup "NumFrames" properties of
+    numFrames = case Map.lookup "NumFrames" properties of
       Just (PropertyInt int32) -> int32ToInt int32
       _ -> 0
   in either (fail . third) (pure . third)
@@ -906,33 +906,28 @@ floatToJson :: Float -> Aeson.Encoding
 floatToJson = Aeson.toEncoding
 
 
-getHashMap :: Get v -> Get (HashMap.HashMap Text.Text v)
-getHashMap decode = getHashMapWith decode HashMap.empty
+getMap :: Get v -> Get (Map.Map Text.Text v)
+getMap decode = getMapWith decode Map.empty
 
-getHashMapWith
-  :: Get v -> HashMap.HashMap Text.Text v -> Get (HashMap.HashMap Text.Text v)
-getHashMapWith decode hashMap = do
+getMapWith :: Get v -> Map.Map Text.Text v -> Get (Map.Map Text.Text v)
+getMapWith decode map_ = do
   key <- getText
   if key == "None"
-    then pure hashMap
+    then pure map_
     else do
       value <- decode
-      getHashMapWith decode $ HashMap.insert key value hashMap
+      getMapWith decode $ Map.insert key value map_
 
-putHashMap :: (v -> Put) -> HashMap.HashMap Text.Text v -> Put
-putHashMap encode = HashMap.foldrWithKey
-  (\key value put -> putText key <> encode value <> put)
-  (putText "None")
+putMap :: (v -> Put) -> Map.Map Text.Text v -> Put
+putMap encode map_ = Map.foldMapWithKey (\ key value -> putText key <> encode value) map_ <> putText "None"
 
-jsonToHashMap
-  :: (Aeson.Value -> Aeson.Parser v)
-  -> Aeson.Value
-  -> Aeson.Parser (HashMap.HashMap Text.Text v)
-jsonToHashMap = Aeson.withObject "HashMap" . mapM
+jsonToMap :: (Aeson.Value -> Aeson.Parser v) -> Aeson.Value -> Aeson.Parser (Map.Map Text.Text v)
+jsonToMap decode value = do
+  map_ <- Aeson.parseJSON value
+  mapM decode map_
 
-hashMapToJson
-  :: (v -> Aeson.Encoding) -> HashMap.HashMap Text.Text v -> Aeson.Encoding
-hashMapToJson encode = Aeson.dict Aeson.text encode HashMap.foldrWithKey
+mapToJson :: (v -> Aeson.Encoding) -> Map.Map Text.Text v -> Aeson.Encoding
+mapToJson encode = Aeson.dict Aeson.text encode Map.foldrWithKey
 
 
 getInt32 :: Get Int.Int32
