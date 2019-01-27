@@ -182,7 +182,7 @@ mainWith name arguments = do
   config <- getConfig name arguments
   input <- getInput $ configInputFile config
   let mode = getMode config
-  replay <- either printErrorMessageAndExit pure $ decodeWith mode input
+  replay <- either (dieLn . formatErrorMessage) pure $ decodeWith mode input
   let output = encodeWith mode replay
   putOutput (configOutputFile config) output
 
@@ -1190,10 +1190,10 @@ data Config = Config
 getConfig :: String -> [String] -> IO Config
 getConfig name arguments = do
   updates <- getUpdates arguments
-  config <- either printErrorMessageAndExit pure
+  config <- either (dieLn . formatErrorMessage) pure
     $ applyUpdates defaultConfig updates
-  Monad.when (configShowHelp config) $ printHelpAndExit name
-  Monad.when (configShowVersion config) printVersionAndExit
+  Monad.when (configShowHelp config) . die $ help name
+  Monad.when (configShowVersion config) $ dieLn version
   pure config
 
 defaultConfig :: Config
@@ -1240,9 +1240,9 @@ getUpdates arguments = do
   let
     (updates, unexpectedArguments, unrecognizedOptions, errorMessages) =
       Console.getOpt' Console.Permute options arguments
-  printUnrecognizedOptions unrecognizedOptions
-  printUnexpectedArguments unexpectedArguments
-  printErrorMessages errorMessages
+  mapM_ (warnLn . formatUnrecognizedOption) unrecognizedOptions
+  mapM_ (warnLn . formatUnexpectedArgument) unexpectedArguments
+  mapM_ (warn . formatErrorMessage) errorMessages
   Monad.unless (null errorMessages) Exit.exitFailure
   pure updates
 
@@ -1297,50 +1297,23 @@ versionOption =
     Right config { configShowVersion = True }
 
 
-printUnrecognizedOptions :: [String] -> IO ()
-printUnrecognizedOptions = mapM_ printUnrecognizedOption
-
-printUnrecognizedOption :: String -> IO ()
-printUnrecognizedOption = warnLn . formatUnrecognizedOption
-
 formatUnrecognizedOption :: String -> String
 formatUnrecognizedOption unrecognizedOption =
   "WARNING: ignoring unrecognized option `" <> unrecognizedOption <> "'"
 
-
-printUnexpectedArguments :: [String] -> IO ()
-printUnexpectedArguments = mapM_ printUnexpectedArgument
-
-printUnexpectedArgument :: String -> IO ()
-printUnexpectedArgument = warnLn . formatUnexpectedArgument
 
 formatUnexpectedArgument :: String -> String
 formatUnexpectedArgument unexpectedArgument =
   "WARNING: ignoring unexpected argument `" <> unexpectedArgument <> "'"
 
 
-printErrorMessages :: [String] -> IO ()
-printErrorMessages = mapM_ printErrorMessage
-
-printErrorMessageAndExit :: String -> IO a
-printErrorMessageAndExit = dieLn . formatErrorMessage
-
-printErrorMessage :: String -> IO ()
-printErrorMessage = warn . formatErrorMessage
-
 formatErrorMessage :: String -> String
 formatErrorMessage = mappend "ERROR: "
 
 
-printHelpAndExit :: String -> IO a
-printHelpAndExit = die . help
-
 help :: String -> String
 help name = Console.usageInfo (name <> " version " <> version) options
 
-
-printVersionAndExit :: IO a
-printVersionAndExit = dieLn version
 
 version :: String
 version = Version.showVersion This.version
